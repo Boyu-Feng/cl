@@ -1,0 +1,111 @@
+[project]
+name = "cl-benchmark"
+version = "0.1.0"
+description = "Benchmark framework for evaluating continual learning systems across sequential task instances"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "huggingface-hub>=0.23.0",
+    "litellm==1.81.6",
+    "openai==2.16.0",
+    "pre-commit==4.5.1",
+    "pydantic==2.12.5",
+    "python-dotenv==1.2.1",
+    "scipy>=1.14.0",
+    "tqdm==4.67.2",
+]
+
+[project.scripts]
+clbench = "src.cli:main"
+
+[project.optional-dependencies]
+# Task-specific dependencies
+poker = [
+    "texasholdem==0.11.0",
+    "matplotlib==3.10.8",
+]
+
+codebase_adaptation = [
+    "datasets==4.6.0",
+    "mini-swe-agent==2.2.4",
+    "swebench==4.1.0",
+]
+
+sales_prediction = [
+    "mini-swe-agent==2.2.4",
+    "pandas>=2.2",
+    "numpy>=2.1",
+    "scikit-learn>=1.6",
+    "pyyaml>=6.0",
+]
+
+cohort_studies = [
+    "lifelines>=0.29",
+    "pandas>=2.2",
+]
+
+mem0 = [
+    "mem0ai>=0.1.0",
+]
+
+local_lora = [
+    "torch>=2.2",
+    "transformers>=4.45",
+    "peft>=0.13",
+]
+
+# Web UI for human baseline collection
+web = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "bcrypt>=4.1.0",
+]
+
+# Optional group kept for `uv sync --extra database_exploration` (huggingface-hub is already a core dep).
+database_exploration = [
+    "huggingface-hub>=0.23.0",
+]
+
+# Install all task dependencies
+all = [
+    "huggingface-hub>=0.23.0",
+    "texasholdem==0.11.0",
+    "matplotlib==3.10.8",
+    "datasets==4.6.0",
+    "mini-swe-agent==2.2.4",
+    "swebench==4.1.0",
+    "pandas>=2.2",
+    "numpy>=2.1",
+    "scikit-learn>=1.6",
+    "pyyaml>=6.0",
+    "lifelines>=0.29",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.2",
+    "ruff==0.14.8",
+    "vulture>=2.16",
+]
+
+# Add exclude patterns here as needed
+[tool.ruff]
+exclude = [
+    "experiments/",
+    "data/"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

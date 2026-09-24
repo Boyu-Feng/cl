@@ -1,0 +1,12 @@
+{
+  "system": {
+    "name": "mem0",
+    "params": {}
+  },
+  "task": {
+    "name": "poker",
+    "params": {
+      "schedule": "quick_test"
+    }
+  }
+}

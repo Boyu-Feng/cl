@@ -1,0 +1,14 @@
+Repository: https://github.com/ace-agent/ace
+Pinned commit: 840bc6d014a5479b50e129e7aa38f5521005e758
+Imported files:
+- LICENSE.txt
+- llm.py
+- logger.py
+- playbook_utils.py
+- utils.py
+- ace/core/generator.py
+- ace/core/reflector.py
+- ace/core/curator.py
+- ace/prompts/generator.py
+- ace/prompts/reflector.py
+- ace/prompts/curator.py

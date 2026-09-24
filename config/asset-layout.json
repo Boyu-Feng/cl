@@ -1,0 +1,921 @@
+{
+  "schema_version": 1,
+  "description": "Only paths and layout metadata; no model weights, datasets or experiment outputs. Legacy links are ignored by Git.",
+  "aliases": [
+    {
+      "legacy": "ttcl/models",
+      "storage": "models/embedding",
+      "kind": "directory"
+    },
+    {
+      "legacy": "ttcl/data",
+      "storage": "data/ttcl",
+      "kind": "directory"
+    },
+    {
+      "legacy": "ttcl/results",
+      "storage": "results/ttcl",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/delta-Mem/model",
+      "storage": "models/delta_mem",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/delta-Mem/data",
+      "storage": "data/delta_mem/data",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/delta-Mem/dataset",
+      "storage": "data/delta_mem/dataset",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/SEAL/models",
+      "storage": "models/seal",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/SEAL/general-knowledge/data",
+      "storage": "data/seal/general_knowledge",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/SEAL/general-knowledge/results",
+      "storage": "results/seal/general_knowledge",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/SEAL/logs",
+      "storage": "results/seal/logs",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/final_results.json",
+      "storage": "results/seal/few_shot/final_results.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/continual-learning-bench/data",
+      "storage": "data/clbench",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/continual-learning-bench/results",
+      "storage": "results/clbench/runs",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/continual-learning-bench/final_results",
+      "storage": "results/clbench/final",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/continual-learning-bench/nohup.out",
+      "storage": "results/clbench/nohup.out",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/ExpeL/data",
+      "storage": "data/expel",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/hotpotqa_runs/data",
+      "storage": "data/reflexion/hotpotqa",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/programming_runs/benchmarks",
+      "storage": "data/reflexion/programming",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/programming_runs/human-eval/data/HumanEval.jsonl.gz",
+      "storage": "data/reflexion/humaneval/HumanEval.jsonl.gz",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_evaluation_challenges.json",
+      "storage": "data/seal/few_shot/arc-agi_evaluation_challenges.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_evaluation_challenges_filtered_1B_eval_set.json",
+      "storage": "data/seal/few_shot/arc-agi_evaluation_challenges_filtered_1B_eval_set.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_evaluation_solutions.json",
+      "storage": "data/seal/few_shot/arc-agi_evaluation_solutions.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_evaluation_solutions_filtered_1B_eval_set.json",
+      "storage": "data/seal/few_shot/arc-agi_evaluation_solutions_filtered_1B_eval_set.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_training_challenges.json",
+      "storage": "data/seal/few_shot/arc-agi_training_challenges.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_training_challenges_filtered_1B_training_set.json",
+      "storage": "data/seal/few_shot/arc-agi_training_challenges_filtered_1B_training_set.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_training_solutions.json",
+      "storage": "data/seal/few_shot/arc-agi_training_solutions.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/arc-agi_training_solutions_filtered_1B_training_set.json",
+      "storage": "data/seal/few_shot/arc-agi_training_solutions_filtered_1B_training_set.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/SEAL/few-shot/data/sample_submission.json",
+      "storage": "data/seal/few_shot/sample_submission.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reflexion/alfworld_runs/root",
+      "storage": "results/reflexion/alfworld_runs/root",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/hotpotqa_runs/root",
+      "storage": "results/reflexion/hotpotqa_runs/root",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/programming_runs/root",
+      "storage": "results/reflexion/programming_runs/root",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/webshop_runs/base_run_logs_1",
+      "storage": "results/reflexion/webshop_runs/base_run_logs_1",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/webshop_runs/base_run_logs_2",
+      "storage": "results/reflexion/webshop_runs/base_run_logs_2",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/webshop_runs/reflexion_run_logs_1",
+      "storage": "results/reflexion/webshop_runs/reflexion_run_logs_1",
+      "kind": "directory"
+    },
+    {
+      "legacy": "current_work/reflexion/webshop_runs/reflexion_run_logs_2",
+      "storage": "results/reflexion/webshop_runs/reflexion_run_logs_2",
+      "kind": "directory"
+    },
+    {
+      "legacy": "models/delta_mem/huggingface",
+      "storage": "data/delta_mem/huggingface",
+      "kind": "directory"
+    },
+    {
+      "legacy": "models/delta_mem/datasets_cache",
+      "storage": "data/delta_mem/datasets_cache",
+      "kind": "directory"
+    },
+    {
+      "legacy": "models/delta_mem/logs",
+      "storage": "results/delta_mem/logs",
+      "kind": "directory"
+    },
+    {
+      "legacy": "models/delta_mem/qasper_multimodel_write8192_benchmark_suite_consistent70",
+      "storage": "results/delta_mem/qasper_multimodel_write8192_benchmark_suite_consistent70",
+      "kind": "directory"
+    },
+    {
+      "legacy": "models/delta_mem/training_run",
+      "storage": "results/delta_mem/training_run",
+      "kind": "directory"
+    },
+    {
+      "legacy": "models/delta_mem/clbench_tsw_results",
+      "storage": "results/delta_mem/clbench_tsw_results",
+      "kind": "directory"
+    },
+    {
+      "legacy": "models/delta_mem/tsw_locomo_smoke_test.json",
+      "storage": "results/delta_mem/tsw_locomo_smoke_test.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "models/delta_mem/tsw_locomo_smoke_test.rank0.jsonl",
+      "storage": "results/delta_mem/tsw_locomo_smoke_test.rank0.jsonl",
+      "kind": "file"
+    },
+    {
+      "legacy": "models/delta_mem/tsw_locomo_smoke_test.rank1.jsonl",
+      "storage": "results/delta_mem/tsw_locomo_smoke_test.rank1.jsonl",
+      "kind": "file"
+    },
+    {
+      "legacy": "models/delta_mem/tsw_locomo_smoke_test.rank2.jsonl",
+      "storage": "results/delta_mem/tsw_locomo_smoke_test.rank2.jsonl",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s000/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s000/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s001/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s001/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s002/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s002/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s003/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s003/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s004/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s004/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s005/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s005/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s006/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s006/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s007/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s007/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s008/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s008/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s009/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s009/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s010/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s010/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s011/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s011/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s012/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s012/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s013/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s013/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s014/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s014/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s015/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s015/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s016/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s016/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s017/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s017/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s018/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s018/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s019/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s019/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s020/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s020/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s021/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s021/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s022/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s022/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s023/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s023/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s024/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s024/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s025/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s025/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s026/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s026/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s027/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s027/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s028/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s028/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s029/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s029/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s030/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s030/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s031/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s031/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s032/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s032/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s033/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s033/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s034/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s034/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s035/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s035/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s036/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s036/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s037/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s037/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s038/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s038/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s039/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s039/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s040/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s040/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s041/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s041/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s042/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s042/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s043/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s043/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s044/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s044/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s045/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s045/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s046/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s046/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s047/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s047/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s048/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s048/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s049/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s049/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s050/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s050/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s051/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s051/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s052/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s052/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s053/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s053/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s054/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s054/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s055/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s055/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s056/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s056/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s057/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s057/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s058/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s058/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s059/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s059/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s060/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s060/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s061/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s061/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s062/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s062/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s063/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s063/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s064/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s064/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s065/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s065/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s066/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s066/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s067/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s067/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s068/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s068/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s069/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s069/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s070/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s070/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/harbor-tasks/gsm8k-s071/environment/problem.json",
+      "storage": "data/reef/gsm8k/gsm8k-s071/problem.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/method-seed-0-2026-09-02/README.md",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/method-seed-0-2026-09-02/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/method-seed-0-2026-09-02/archive.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/method-seed-0-2026-09-02/archive.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/method-seed-0-2026-09-02/summary.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/method-seed-0-2026-09-02/summary.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/method-seed-1-2026-09-02/README.md",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/method-seed-1-2026-09-02/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/method-seed-1-2026-09-02/archive.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/method-seed-1-2026-09-02/archive.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/method-seed-1-2026-09-02/summary.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/method-seed-1-2026-09-02/summary.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/README.md",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-0-config.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-0-config.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-0-summary.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-0-summary.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-1-config.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-1-config.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-1-summary.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/official-seeds-0-1-2026-09-02/seed-1-summary.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/README.md",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-official-task-usage.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-official-task-usage.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-reef-task-usage.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-reef-task-usage.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-result.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-result.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-run-identity.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/baseline-run-identity.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/manifest.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/manifest.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/optimization-run-identity.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/optimization-run-identity.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/reference-config.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/reference-config.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/reference-run-log.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/reference-run-log.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/reference-summary.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/reference-summary.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/rules-config.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/rules-config.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/rules-run-log.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/rules-run-log.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/rules-summary.json",
+      "storage": "results/upstream_reef/gepa/examples/aime/results/quickstart-seed-0-2026-09-01/rules-summary.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/meta_harness/results/reef_harness.py",
+      "storage": "results/upstream_reef/meta_harness/results/reef_harness.py",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/results/2026-08-27-gsm8k-stream-qwen3-4b-thinking/demo.gif",
+      "storage": "results/upstream_reef/openclawrl/examples/openclawrl/results/2026-08-27-gsm8k-stream-qwen3-4b-thinking/demo.gif",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/openclawrl/examples/openclawrl/results/2026-08-27-gsm8k-stream-qwen3-4b-thinking/learning_curve.png",
+      "storage": "results/upstream_reef/openclawrl/examples/openclawrl/results/2026-08-27-gsm8k-stream-qwen3-4b-thinking/learning_curve.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sao/examples/ceobench/results/2026-09-13-baseline-qwen3.6-27b-seed42/manifest.json",
+      "storage": "results/upstream_reef/sao/examples/ceobench/results/2026-09-13-baseline-qwen3.6-27b-seed42/manifest.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sao/examples/ceobench/results/2026-09-13-baseline-qwen3.6-27b-seed42/run-config.json",
+      "storage": "results/upstream_reef/sao/examples/ceobench/results/2026-09-13-baseline-qwen3.6-27b-seed42/run-config.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sao/examples/ceobench/results/2026-09-13-baseline-qwen3.6-27b-seed42/weeks.csv",
+      "storage": "results/upstream_reef/sao/examples/ceobench/results/2026-09-13-baseline-qwen3.6-27b-seed42/weeks.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sao/examples/ceobench/results/2026-09-14-trained-qwen3.6-27b-seed42/holds.csv",
+      "storage": "results/upstream_reef/sao/examples/ceobench/results/2026-09-14-trained-qwen3.6-27b-seed42/holds.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sao/examples/ceobench/results/2026-09-14-trained-qwen3.6-27b-seed42/manifest.json",
+      "storage": "results/upstream_reef/sao/examples/ceobench/results/2026-09-14-trained-qwen3.6-27b-seed42/manifest.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sao/examples/ceobench/results/2026-09-14-trained-qwen3.6-27b-seed42/weeks.csv",
+      "storage": "results/upstream_reef/sao/examples/ceobench/results/2026-09-14-trained-qwen3.6-27b-seed42/weeks.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sao/examples/imo_answerbench/results/2026-08-15-imo-answerbench-qwen3-30b-a3b/learning_curve.png",
+      "storage": "results/upstream_reef/sao/examples/imo_answerbench/results/2026-08-15-imo-answerbench-qwen3-30b-a3b/learning_curve.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/sdft/examples/skill_stream/results/2026-09-19-skill-stream-qwen2.5-7b/learning_curve.png",
+      "storage": "results/upstream_reef/sdft/examples/skill_stream/results/2026-09-19-skill-stream-qwen2.5-7b/learning_curve.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/guidance_ttt/results/README.md",
+      "storage": "results/upstream_reef/tttd/examples/guidance_ttt/results/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/guidance_ttt/results/polyomino.md",
+      "storage": "results/upstream_reef/tttd/examples/guidance_ttt/results/polyomino.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/guidance_ttt/results/runs.json",
+      "storage": "results/upstream_reef/tttd/examples/guidance_ttt/results/runs.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/guidance_ttt/results/trimul.md",
+      "storage": "results/upstream_reef/tttd/examples/guidance_ttt/results/trimul.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-erdos/README.md",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-erdos/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-erdos/best_solution_history.png",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-erdos/best_solution_history.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-erdos/summary.csv",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-erdos/summary.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/README.md",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/best_solution_history.csv",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/best_solution_history.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/best_solution_history.png",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/best_solution_history.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/manifest.json",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/manifest.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/README.md",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/best_solution.py",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/best_solution.py",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/best_solution_history.png",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/best_solution_history.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/circles.csv",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/circles.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/history.jsonl",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/history.jsonl",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/step-020.json",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/step-020.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/step-040.json",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/step-040.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/step-050.json",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing26/step-050.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/README.md",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/README.md",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/best_solution.py",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/best_solution.py",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/best_solution_history.png",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/best_solution_history.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/circles.csv",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/circles.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/history.jsonl",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/history.jsonl",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/step-020.json",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/step-020.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/step-040.json",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/step-040.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/step-050.json",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing32/step-050.json",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/packing_configurations.png",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/packing_configurations.png",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/summary.csv",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/summary.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/wandb_history.csv",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/wandb_history.csv",
+      "kind": "file"
+    },
+    {
+      "legacy": "current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/wandb_training_metrics.png",
+      "storage": "results/upstream_reef/tttd/examples/tttd/results/formal-8x64-v3-packing/wandb_training_metrics.png",
+      "kind": "file"
+    }
+  ]
+}

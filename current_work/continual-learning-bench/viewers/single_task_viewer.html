@@ -1,0 +1,2679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="/">
+    <script>
+        // file:// mode: drop the HTTP-only root base so postMessage drill-in
+        // from run_all_viewer (also opened from disk) can reach this page.
+        if (location.protocol === "file:") {
+            const base = document.querySelector("base");
+            if (base) base.remove();
+        }
+    </script>
+    <title>Benchmark Viewer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #f3efe6;
+            --bg-soft: #fbf8f1;
+            --ink: #1c2923;
+            --muted: #5f6a61;
+            --line: #d8d0c0;
+            --card: rgba(255, 252, 246, 0.92);
+            --accent: #0b6b57;
+            --accent-soft: #d4efe6;
+            --accent-strong: #085343;
+            --gold: #c88a1c;
+            --rose: #9d4d3a;
+            --shadow: 0 18px 42px rgba(28, 41, 35, 0.10);
+            --radius: 18px;
+            --mono: "SFMono-Regular", "Menlo", "Consolas", monospace;
+            --sans: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top left, rgba(200, 138, 28, 0.10), transparent 32%),
+                radial-gradient(circle at top right, rgba(11, 107, 87, 0.12), transparent 28%),
+                linear-gradient(180deg, #faf6ee 0%, var(--bg) 100%);
+            color: var(--ink);
+            font-family: var(--sans);
+            line-height: 1.45;
+        }
+
+        .shell {
+            width: min(1440px, calc(100vw - 32px));
+            margin: 0 auto;
+            padding: 24px 0 40px;
+        }
+
+        .hero {
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.42);
+            border-radius: 28px;
+            background:
+                linear-gradient(135deg, rgba(11, 107, 87, 0.94), rgba(13, 80, 115, 0.88)),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.0));
+            color: #f9fbfa;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -60px -80px auto;
+            width: 240px;
+            height: 240px;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 68%);
+        }
+
+        .hero h1 {
+            margin: 0 0 8px;
+            font-size: clamp(2rem, 3vw, 3rem);
+            letter-spacing: -0.03em;
+        }
+
+        .hero p {
+            margin: 0;
+            max-width: 760px;
+            color: rgba(249, 251, 250, 0.86);
+        }
+
+        .hero-grid {
+            margin-top: 20px;
+            display: grid;
+            gap: 16px;
+            grid-template-columns: 1.2fr 0.8fr;
+        }
+
+        .panel {
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.10);
+            backdrop-filter: blur(8px);
+            padding: 16px;
+        }
+
+        .panel h2 {
+            margin: 0 0 10px;
+            font-size: 0.92rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(249, 251, 250, 0.78);
+        }
+
+        .file-row,
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .button,
+        label.file-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 999px;
+            padding: 10px 16px;
+            font: inherit;
+            background: rgba(255, 255, 255, 0.14);
+            color: #f9fbfa;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .button:hover,
+        label.file-button:hover {
+            background: rgba(255, 255, 255, 0.22);
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            max-width: 100%;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            font-size: 0.92rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #f8f7d2;
+        }
+
+        .status-dot.running {
+            background: #ffd66e;
+            box-shadow: 0 0 0 8px rgba(255, 214, 110, 0.14);
+        }
+
+        .status-dot.completed {
+            background: #9cf0d2;
+            box-shadow: 0 0 0 8px rgba(156, 240, 210, 0.12);
+        }
+
+        .status-dot.error {
+            background: #ffb9a9;
+            box-shadow: 0 0 0 8px rgba(255, 185, 169, 0.12);
+        }
+
+        .body-grid {
+            margin-top: 22px;
+            display: grid;
+            gap: 20px;
+        }
+
+        .card {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--card);
+            box-shadow: var(--shadow);
+            padding: 22px;
+        }
+
+        .card.collapsible-card,
+        .chart-card.collapsible-chart {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .section-toggle,
+        .chart-toggle {
+            list-style: none;
+            cursor: pointer;
+        }
+
+        .section-toggle::-webkit-details-marker,
+        .chart-toggle::-webkit-details-marker {
+            display: none;
+        }
+
+        .section-toggle {
+            padding: 22px;
+            display: flex;
+            gap: 16px;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-body {
+            padding: 0 22px 22px;
+        }
+
+        .chart-toggle {
+            padding: 18px 18px 0;
+            display: flex;
+            gap: 14px;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .chart-body {
+            padding: 0 18px 18px;
+        }
+
+        .toggle-copy {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .toggle-caret {
+            flex: 0 0 auto;
+            color: var(--muted);
+            font-size: 1.2rem;
+            line-height: 1;
+            transition: transform 0.18s ease;
+        }
+
+        .collapsible-card[open] .toggle-caret,
+        .collapsible-chart[open] .toggle-caret {
+            transform: rotate(90deg);
+        }
+
+        .overview-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }
+
+        .progress-stack {
+            display: grid;
+            gap: 14px;
+        }
+
+        .progress-row {
+            display: grid;
+            gap: 8px;
+        }
+
+        .progress-head {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.92rem;
+        }
+
+        .progress-title {
+            font-weight: 700;
+        }
+
+        .progress-meta {
+            color: var(--muted);
+            font-size: 0.88rem;
+        }
+
+        .progress-track {
+            width: 100%;
+            height: 12px;
+            border-radius: 999px;
+            background: #e6dfd0;
+            overflow: hidden;
+            border: 1px solid rgba(216, 208, 192, 0.9);
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #0b6b57, #249e84);
+            transition: width 0.25s ease;
+        }
+
+        .progress-fill.pending {
+            background: linear-gradient(90deg, #a6a095, #c5beb1);
+        }
+
+        .progress-fill.completed {
+            background: linear-gradient(90deg, #0b6b57, #249e84);
+        }
+
+        .progress-fill.running {
+            background: linear-gradient(90deg, #c88a1c, #e2b256);
+        }
+
+        .metric-card {
+            min-width: 0;
+            padding: 18px;
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 244, 235, 0.90));
+            border: 1px solid rgba(216, 208, 192, 0.75);
+        }
+
+        .metric-label {
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            font-size: 1.7rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            line-height: 1.15;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .metric-sub {
+            margin-top: 6px;
+            font-size: 0.92rem;
+            color: var(--muted);
+        }
+
+        .section-head {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            margin: 0;
+            font-size: 1.15rem;
+            letter-spacing: -0.02em;
+        }
+
+        .section-copy {
+            color: var(--muted);
+            font-size: 0.94rem;
+        }
+
+        .chart-grid {
+            display: grid;
+            gap: 18px;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        }
+
+        .curve-metrics {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            margin-bottom: 18px;
+        }
+
+        .curve-metrics.single {
+            grid-template-columns: minmax(240px, 360px);
+            justify-content: start;
+        }
+
+        .chart-card {
+            padding: 18px;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(249, 247, 241, 0.9));
+        }
+
+        .chart-title {
+            margin: 0 0 6px;
+            font-size: 1rem;
+        }
+
+        .chart-subtitle {
+            margin: 0 0 12px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .chart-shell {
+            width: 100%;
+            min-height: 248px;
+            position: relative;
+        }
+
+        .chart-shell svg {
+            display: block;
+            overflow: visible;
+        }
+
+        .chart-tooltip {
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform: translate(-50%, calc(-100% - 10px));
+            min-width: 136px;
+            max-width: 240px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: rgba(28, 41, 35, 0.95);
+            color: #f9fbfa;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            box-shadow: 0 12px 24px rgba(28, 41, 35, 0.22);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.12s ease;
+            z-index: 2;
+        }
+
+        .chart-tooltip.visible {
+            opacity: 1;
+        }
+
+        .chart-tooltip.anchored-below {
+            transform: translate(-50%, 10px);
+        }
+
+        .chart-tooltip strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.84rem;
+        }
+
+        .chart-point {
+            cursor: pointer;
+            outline: none;
+        }
+
+        .chart-point-dot {
+            transition: r 0.12s ease, opacity 0.12s ease;
+        }
+
+        .chart-point:hover .chart-point-dot,
+        .chart-point:focus .chart-point-dot {
+            r: 5.5;
+            opacity: 1;
+        }
+
+        .chart-point-hit {
+            fill: transparent;
+        }
+
+        .chart-empty {
+            min-height: 248px;
+            display: grid;
+            place-items: center;
+            color: var(--muted);
+            border: 1px dashed var(--line);
+            border-radius: 12px;
+        }
+
+        .chart-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 12px;
+            font-size: 0.86rem;
+            color: var(--muted);
+        }
+
+        .legend-chip {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            max-width: 100%;
+        }
+
+        .legend-line {
+            width: 18px;
+            height: 3px;
+            border-radius: 999px;
+        }
+
+        .split {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: 1.6fr 1fr;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px 10px;
+            border-top: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        td {
+            font-size: 0.94rem;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        .run-select {
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: #fff;
+            cursor: pointer;
+        }
+
+        .run-select.selected {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: end;
+            margin-bottom: 16px;
+        }
+
+        .field {
+            display: grid;
+            gap: 6px;
+            min-width: 150px;
+            flex: 1 1 180px;
+        }
+
+        .field label {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        .field input,
+        .field select {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 10px 12px;
+            font: inherit;
+            background: #fffdf9;
+            color: var(--ink);
+        }
+
+        .trace-summary {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            margin-bottom: 16px;
+        }
+
+        .trace-pill {
+            min-width: 0;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: var(--bg-soft);
+            border: 1px solid var(--line);
+        }
+
+        .trace-pill strong {
+            display: block;
+            margin-top: 4px;
+            font-size: 1rem;
+        }
+
+        .instance-list {
+            display: grid;
+            gap: 14px;
+        }
+
+        details.instance-card {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(249, 247, 241, 0.86));
+            overflow: hidden;
+        }
+
+        details.instance-card summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 16px 18px;
+            display: grid;
+            gap: 12px;
+        }
+
+        details.instance-card summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .instance-top {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .instance-title {
+            font-size: 1rem;
+            font-weight: 700;
+        }
+
+        .instance-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .pill {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            max-width: 100%;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--accent-strong);
+            font-size: 0.84rem;
+            font-weight: 600;
+        }
+
+        .pill.warn {
+            background: #fde8cf;
+            color: #8a5710;
+        }
+
+        .pill.fail {
+            background: #f6ddd7;
+            color: #7b3427;
+        }
+
+        .instance-body {
+            padding: 0 18px 18px;
+            display: grid;
+            gap: 14px;
+        }
+
+        .meta-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }
+
+        .meta-box {
+            min-width: 0;
+            border: 1px solid var(--line);
+            background: #fffdf9;
+            border-radius: 12px;
+            padding: 12px;
+        }
+
+        .meta-box span {
+            display: block;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .step-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .step-card {
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #fffdf9;
+            padding: 14px;
+        }
+
+        .step-head {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .step-title {
+            font-weight: 700;
+        }
+
+        .step-meta {
+            color: var(--muted);
+            font-size: 0.86rem;
+        }
+
+        .step-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+
+        .block {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: #fbf8f1;
+            padding: 12px;
+        }
+
+        .block h4 {
+            margin: 0 0 8px;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        .block pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font: 0.86rem/1.45 var(--mono);
+            color: var(--ink);
+        }
+
+        .json-chip {
+            font-family: var(--mono);
+            font-size: 0.8rem;
+            color: var(--muted);
+            word-break: break-word;
+        }
+
+        .status-badge,
+        .metric-label,
+        .metric-sub,
+        .section-copy,
+        .progress-meta,
+        .legend-chip,
+        .trace-pill,
+        .trace-pill strong,
+        .pill,
+        .meta-box,
+        .meta-box > :not(span),
+        .json-chip,
+        th,
+        td {
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .metadata-toggle {
+            margin-top: 8px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: #fbf8f1;
+        }
+
+        .metadata-toggle summary {
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+            user-select: none;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .metadata-toggle summary::-webkit-details-marker { display: none; }
+
+        .metadata-toggle summary::before {
+            content: "▶";
+            font-size: 0.65rem;
+            transition: transform 0.15s;
+        }
+
+        .metadata-toggle[open] summary::before {
+            transform: rotate(90deg);
+        }
+
+        .metadata-toggle pre {
+            margin: 0;
+            padding: 8px 12px 10px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font: 0.86rem/1.45 var(--mono);
+            color: var(--ink);
+            border-top: 1px solid var(--line);
+        }
+
+        .brief-box {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(249, 247, 241, 0.88));
+            padding: 18px;
+        }
+
+        .brief-box dl {
+            margin: 0;
+            display: grid;
+            gap: 12px;
+        }
+
+        .brief-box dt {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        .brief-box dd {
+            margin: 4px 0 0;
+            color: var(--ink);
+        }
+
+        .empty {
+            color: var(--muted);
+            border: 1px dashed var(--line);
+            border-radius: 14px;
+            padding: 18px;
+            text-align: center;
+        }
+
+        .footer-note {
+            color: var(--muted);
+            font-size: 0.88rem;
+        }
+
+        @media (max-width: 1024px) {
+            .hero-grid,
+            .split {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .shell {
+                width: min(100vw - 20px, 100%);
+                padding-top: 16px;
+            }
+
+            .hero {
+                padding: 20px;
+                border-radius: 22px;
+            }
+
+            .card {
+                padding: 18px;
+            }
+
+            .card.collapsible-card {
+                padding: 0;
+            }
+
+            .section-toggle {
+                padding: 18px;
+            }
+
+            .section-body {
+                padding: 0 18px 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <h1>Continual Learning Bench</h1>
+            <p>
+                Load one artifact at a time: a live manifest for polling, a run summary for
+                benchmark-level results, or a trace for instance-by-instance interaction inspection.
+            </p>
+            <div class="hero-grid">
+                <div class="panel">
+                    <h2>Data Sources</h2>
+                    <div class="file-row">
+                        <label class="file-button">
+                            Load Artifact
+                            <input id="artifactFile" type="file" accept=".json,.json.gz,application/json,application/gzip">
+                        </label>
+                        <button class="button" id="clearButton" type="button">Clear</button>
+                    </div>
+                    <p class="footer-note" id="sourceHint">
+                        Load a live manifest, run summary, or trace JSON. For live viewing, run the benchmark with <code>--live-dashboard</code> and open the printed URL.
+                    </p>
+                </div>
+                <div class="panel">
+                    <h2>Status</h2>
+                    <div class="hero-actions">
+                        <div class="status-badge">
+                            <span class="status-dot" id="statusDot"></span>
+                            <span id="statusText">Waiting for data</span>
+                        </div>
+                        <div class="status-badge" id="modeBadge">Mode: idle</div>
+                    </div>
+                    <p class="footer-note" id="pollingText">Polling is off.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="body-grid">
+            <details class="card collapsible-card" open>
+                <summary class="section-toggle">
+                    <div class="toggle-copy">
+                        <h2 class="section-title">Overview</h2>
+                        <div class="section-copy" id="overviewCopy">No benchmark loaded yet.</div>
+                    </div>
+                    <span class="toggle-caret" aria-hidden="true">▸</span>
+                </summary>
+                <div class="section-body">
+                    <div class="overview-grid" id="overviewGrid"></div>
+                </div>
+            </details>
+
+            <details class="card collapsible-card" open>
+                <summary class="section-toggle">
+                    <div class="toggle-copy">
+                        <h2 class="section-title">Task Brief</h2>
+                        <div class="section-copy">What the agent is told up front about the objective and reward.</div>
+                    </div>
+                    <span class="toggle-caret" aria-hidden="true">▸</span>
+                </summary>
+                <div class="section-body">
+                    <div id="briefMount" class="empty">Load a summary or live manifest to see the shared task brief.</div>
+                </div>
+            </details>
+
+            <details class="card collapsible-card" open>
+                <summary class="section-toggle">
+                        <div class="toggle-copy">
+                            <h2 class="section-title">Learning Curves</h2>
+                            <div class="section-copy">Cumulative gain is the headline metric; reward and gain plots show how it was earned.</div>
+                        </div>
+                        <span class="toggle-caret" aria-hidden="true">▸</span>
+                    </summary>
+                <div class="section-body">
+                    <div id="curveMetrics" class="curve-metrics"></div>
+                    <div class="chart-grid">
+                        <details class="chart-card collapsible-chart" open>
+                            <summary class="chart-toggle">
+                                <div class="toggle-copy">
+                                    <h3 class="chart-title">Mean Gain By Index</h3>
+                                    <p class="chart-subtitle">Mean gain relative to the baseline reward at each sequence index.</p>
+                                </div>
+                                <span class="toggle-caret" aria-hidden="true">▸</span>
+                            </summary>
+                            <div class="chart-body">
+                                <div id="gainChart" class="chart-shell"></div>
+                            </div>
+                        </details>
+                        <details class="chart-card collapsible-chart" open>
+                            <summary class="chart-toggle">
+                                <div class="toggle-copy">
+                                    <h3 class="chart-title">Mean Reward By Index</h3>
+                                    <p class="chart-subtitle">Mean run reward at each sequence index.</p>
+                                </div>
+                                <span class="toggle-caret" aria-hidden="true">▸</span>
+                            </summary>
+                            <div class="chart-body">
+                                <div id="rewardChart" class="chart-shell"></div>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+            </details>
+
+            <section class="split">
+                <details class="card collapsible-card" open>
+                    <summary class="section-toggle">
+                        <div class="toggle-copy">
+                            <h2 class="section-title">Runs</h2>
+                            <div class="section-copy">Pick a run to inspect its interactions.</div>
+                        </div>
+                        <span class="toggle-caret" aria-hidden="true">▸</span>
+                    </summary>
+                    <div class="section-body">
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Run</th>
+                                        <th>Status</th>
+                                        <th>Progress</th>
+                                        <th>Cumulative Gain</th>
+                                        <th>Total Reward</th>
+                                        <th>Latency</th>
+                                        <th>Cost</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="runsTableBody">
+                                    <tr><td colspan="8" class="empty">No runs loaded.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </details>
+
+                <details class="card collapsible-card" open>
+                    <summary class="section-toggle">
+                        <div class="toggle-copy">
+                            <h2 class="section-title">Progress</h2>
+                            <div class="section-copy">Simple phase and run progress bars for the benchmark.</div>
+                        </div>
+                        <span class="toggle-caret" aria-hidden="true">▸</span>
+                    </summary>
+                    <div class="section-body">
+                        <div id="progressSummary" class="empty">No progress data loaded.</div>
+                    </div>
+                </details>
+            </section>
+
+            <details class="card collapsible-card" open>
+                <summary class="section-toggle">
+                    <div class="toggle-copy">
+                        <h2 class="section-title">Interaction Explorer</h2>
+                        <div class="section-copy">Grouped by instance index and ID. <strong>Success or failure reflects task-defined criteria, not whether the run errored.</strong></div>
+                    </div>
+                    <span class="toggle-caret" aria-hidden="true">▸</span>
+                </summary>
+                <div class="section-body">
+                    <div class="toolbar">
+                        <div class="field">
+                            <label for="searchInput">Search</label>
+                            <input id="searchInput" type="text" placeholder="Search prompts, actions, observations, or instance IDs">
+                        </div>
+                        <div class="field">
+                            <label for="successFilter">Outcome Filter</label>
+                            <select id="successFilter">
+                                <option value="all">All instances</option>
+                                <option value="success">Success only</option>
+                                <option value="failure">Failure only</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="instanceJump">Jump To Instance</label>
+                            <select id="instanceJump">
+                                <option value="">Select an instance</option>
+                            </select>
+                        </div>
+                        <button class="button" id="expandAllButton" type="button">Expand All</button>
+                        <button class="button" id="collapseAllButton" type="button">Collapse All</button>
+                    </div>
+                    <div id="traceSummaryMount" class="empty">Select a run or load a trace artifact to inspect interactions.</div>
+                    <div id="instanceList" class="instance-list"></div>
+                </div>
+            </details>
+        </section>
+    </main>
+
+    <script>
+        const state = {
+            mode: "idle",
+            pollingTimer: null,
+            pollIntervalMs: 2000,
+            liveManifestUrl: null,
+            liveManifest: null,
+            summaryData: null,
+            summaryLoadedFromUrl: false,
+            manualTraceData: null,
+            fetchedRunTraces: new Map(),
+            fetchedBaselineTrace: null,
+            selectedRunIndex: null,
+            openInstanceKeys: new Set(),
+            openMetadataKeys: new Set(),
+        };
+
+        const dom = {
+            artifactFile: document.getElementById("artifactFile"),
+            clearButton: document.getElementById("clearButton"),
+            statusDot: document.getElementById("statusDot"),
+            statusText: document.getElementById("statusText"),
+            modeBadge: document.getElementById("modeBadge"),
+            pollingText: document.getElementById("pollingText"),
+            overviewCopy: document.getElementById("overviewCopy"),
+            overviewGrid: document.getElementById("overviewGrid"),
+            briefMount: document.getElementById("briefMount"),
+            curveMetrics: document.getElementById("curveMetrics"),
+            rewardChart: document.getElementById("rewardChart"),
+            gainChart: document.getElementById("gainChart"),
+            runsTableBody: document.getElementById("runsTableBody"),
+            progressSummary: document.getElementById("progressSummary"),
+            searchInput: document.getElementById("searchInput"),
+            successFilter: document.getElementById("successFilter"),
+            instanceJump: document.getElementById("instanceJump"),
+            expandAllButton: document.getElementById("expandAllButton"),
+            collapseAllButton: document.getElementById("collapseAllButton"),
+            traceSummaryMount: document.getElementById("traceSummaryMount"),
+            instanceList: document.getElementById("instanceList"),
+        };
+
+        function clamp(value, min, max) {
+            return Math.min(max, Math.max(min, value));
+        }
+
+        function formatNumber(value, digits = 4) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            return Number(value).toFixed(digits);
+        }
+
+        function formatSigned(value, digits = 4) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            const number = Number(value);
+            return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
+        }
+
+        function formatDuration(value) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            return `${Number(value).toFixed(2)}s`;
+        }
+
+        function formatCurrency(value) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            return `$${Number(value).toFixed(6)}`;
+        }
+
+        function numericSeries(values) {
+            return (values || [])
+                .filter((value) => value !== null && value !== undefined && Number.isFinite(Number(value)))
+                .map(Number);
+        }
+
+        function sumSeries(values) {
+            const numbers = numericSeries(values);
+            if (!numbers.length) {
+                return null;
+            }
+            return numbers.reduce((sum, value) => sum + value, 0);
+        }
+
+        function getAggregateCumulativeReward(aggregate) {
+            return sumSeries(aggregate?.mean_reward_by_index);
+        }
+
+        function getAggregateCumulativeGain(aggregate) {
+            return sumSeries(aggregate?.mean_gain_by_index);
+        }
+
+        function getRunCumulativeGain(aggregate) {
+            if (aggregate?.total_gain !== null && aggregate?.total_gain !== undefined) {
+                return Number(aggregate.total_gain);
+            }
+            return null;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        // Like escapeHtml but also converts literal \n / \t sequences
+        // (as produced by JSON.stringify on strings containing newlines)
+        // into real whitespace so <pre> renders them as line breaks/indents.
+        function renderPre(value) {
+            return escapeHtml(value).replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+        }
+
+        function stopPolling() {
+            if (state.pollingTimer !== null) {
+                clearInterval(state.pollingTimer);
+                state.pollingTimer = null;
+            }
+        }
+
+        function setStatus(status, text, modeText) {
+            dom.statusDot.className = `status-dot ${status}`;
+            dom.statusText.textContent = text;
+            dom.modeBadge.textContent = `Mode: ${modeText}`;
+        }
+
+        function isGzipBytes(bytes) {
+            return bytes && bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+        }
+
+        async function decompressGzipBytes(bytes) {
+            if (typeof DecompressionStream === "undefined") {
+                throw new Error("This browser cannot read .json.gz artifacts (DecompressionStream unavailable).");
+            }
+            const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+            return new Uint8Array(await new Response(stream).arrayBuffer());
+        }
+
+        async function parseJsonBytes(bytes) {
+            const payloadBytes = isGzipBytes(bytes) ? await decompressGzipBytes(bytes) : bytes;
+            return JSON.parse(new TextDecoder().decode(payloadBytes));
+        }
+
+        async function readJsonFile(file) {
+            return parseJsonBytes(new Uint8Array(await file.arrayBuffer()));
+        }
+
+        async function fetchJson(url) {
+            const response = await fetch(url, { cache: "no-store" });
+            if (!response.ok) {
+                throw new Error(`Failed to fetch ${url}: ${response.status}`);
+            }
+            return parseJsonBytes(new Uint8Array(await response.arrayBuffer()));
+        }
+
+        function normalizeSummaryShape(summary) {
+            if (!summary || !summary.run_group_id || !Array.isArray(summary.runs)) {
+                return null;
+            }
+            return summary;
+        }
+
+        function isManifestShape(data) {
+            return Boolean(data && (data.kind === "live_manifest" || (data.poll_interval_ms && Array.isArray(data.runs))));
+        }
+
+        function isViewerArtifactShape(data) {
+            return Boolean(data && data.kind === "viewer_artifact" && data.summary);
+        }
+
+        function isTraceShape(data) {
+            return Boolean(data && Array.isArray(data.interactions) && data.execution);
+        }
+
+        function applyTraceArtifact(data) {
+            if (!isTraceShape(data)) {
+                throw new Error("Trace file does not match the expected trace shape.");
+            }
+            state.manualTraceData = data;
+            renderAll();
+        }
+
+        function applySummaryArtifact(data) {
+            const normalized = normalizeSummaryShape(data);
+            if (!normalized) {
+                throw new Error("The loaded JSON does not match the run summary shape.");
+            }
+            stopPolling();
+            state.mode = "summary";
+            state.liveManifestUrl = null;
+            state.liveManifest = null;
+            state.summaryData = normalized;
+            state.summaryLoadedFromUrl = false;
+            state.manualTraceData = null;
+            state.fetchedRunTraces = new Map();
+            state.fetchedBaselineTrace = null;
+            if (state.selectedRunIndex === null && normalized.runs?.length) {
+                state.selectedRunIndex = normalized.runs[0].run_index;
+            }
+            renderAll();
+        }
+
+        function applyManifestArtifact(data, sourceUrl = null) {
+            if (!isManifestShape(data)) {
+                throw new Error("The loaded JSON does not match the live manifest shape.");
+            }
+            stopPolling();
+            state.mode = "live";
+            state.liveManifestUrl = sourceUrl;
+            state.liveManifest = data;
+            state.summaryData = null;
+            state.summaryLoadedFromUrl = false;
+            state.manualTraceData = null;
+            state.fetchedRunTraces = new Map();
+            state.fetchedBaselineTrace = null;
+            if (state.selectedRunIndex === null && data.runs?.length) {
+                state.selectedRunIndex = data.runs[0].run_index;
+            }
+            renderAll();
+        }
+
+        function applyArtifact(data, options = {}) {
+            const { sourceUrl = null } = options;
+            if (isViewerArtifactShape(data)) {
+                applyViewerArtifact(data);
+                return "viewer_artifact";
+            }
+            if (isManifestShape(data)) {
+                applyManifestArtifact(data, sourceUrl);
+                return "manifest";
+            }
+            if (normalizeSummaryShape(data)) {
+                applySummaryArtifact(data);
+                return "summary";
+            }
+            if (isTraceShape(data)) {
+                applyTraceArtifact(data);
+                return "trace";
+            }
+            throw new Error("Unsupported JSON shape. Expected a viewer artifact, live manifest, run summary, or trace.");
+        }
+
+        function applyViewerArtifact(data) {
+            const summary = normalizeSummaryShape(data.summary);
+            if (!summary) {
+                throw new Error("Viewer artifact does not contain a valid run summary.");
+            }
+            stopPolling();
+            state.mode = "summary";
+            state.liveManifestUrl = null;
+            state.liveManifest = null;
+            state.summaryData = summary;
+            state.summaryLoadedFromUrl = false;
+            state.manualTraceData = null;
+            state.fetchedBaselineTrace = data.baseline_trace || null;
+            state.fetchedRunTraces = new Map(
+                (data.run_traces || [])
+                    .filter((entry) => entry && entry.trace && entry.run_index !== undefined && entry.run_index !== null)
+                    .map((entry) => [Number(entry.run_index), entry.trace])
+            );
+            if (state.selectedRunIndex === null && summary.runs?.length) {
+                state.selectedRunIndex = summary.runs[0].run_index;
+            }
+            renderAll();
+        }
+
+        function enrichRunOutcomesWithBaseline(baselineOutcomes, runOutcomes) {
+            if (!Array.isArray(runOutcomes)) {
+                return [];
+            }
+            const baselineById = new Map(
+                (baselineOutcomes || [])
+                    .filter((outcome) => outcome && outcome.instance_id !== undefined && outcome.instance_id !== null)
+                    .map((outcome) => [String(outcome.instance_id), outcome])
+            );
+            const baselineByIndex = new Map(
+                (baselineOutcomes || [])
+                    .filter((outcome) => outcome && outcome.instance_index !== undefined && outcome.instance_index !== null)
+                    .map((outcome) => [Number(outcome.instance_index), outcome])
+            );
+            return runOutcomes.map((outcome, index) => {
+                const baseline = (
+                    outcome?.instance_id !== undefined && outcome?.instance_id !== null
+                        ? baselineById.get(String(outcome.instance_id))
+                        : null
+                ) ?? (
+                    outcome?.instance_index !== undefined && outcome?.instance_index !== null
+                        ? baselineByIndex.get(Number(outcome.instance_index))
+                        : null
+                ) ?? baselineOutcomes[index];
+                const baselineReward = baseline ? Number(baseline.reward) : null;
+                const reward = Number(outcome.reward ?? 0);
+                return {
+                    ...outcome,
+                    baseline_reward: baselineReward,
+                    gain: baselineReward === null ? null : reward - baselineReward,
+                };
+            });
+        }
+
+        function summarizeOutcomes(outcomes) {
+            const rewards = outcomes.map((outcome) => Number(outcome.reward ?? 0));
+            const gains = outcomes
+                .map((outcome) => outcome.gain)
+                .filter((value) => value !== null && value !== undefined)
+                .map(Number);
+            const costs = outcomes
+                .map((outcome) => outcome.cost_usd)
+                .filter((value) => value !== null && value !== undefined)
+                .map(Number);
+            const summary = {
+                instances_completed: outcomes.length,
+                total_reward: rewards.reduce((sum, value) => sum + value, 0),
+                mean_reward: rewards.length ? rewards.reduce((sum, value) => sum + value, 0) / rewards.length : 0,
+                total_gain: gains.reduce((sum, value) => sum + value, 0),
+                mean_gain: gains.length ? gains.reduce((sum, value) => sum + value, 0) / gains.length : 0,
+            };
+            if (costs.length) {
+                summary.total_cost = costs.reduce((sum, value) => sum + value, 0);
+                summary.mean_cost = summary.total_cost / costs.length;
+            }
+            return summary;
+        }
+
+        function buildAggregateFromRuns(baselineOutcomes, runs) {
+            const maxLength = Math.max(0, ...runs.map((run) => (run.instance_outcomes || []).length));
+            const meanRewardByIndex = [];
+            const meanGainByIndex = [];
+
+            for (let index = 0; index < maxLength; index += 1) {
+                const rewardValues = [];
+                const gainValues = [];
+
+                runs.forEach((run) => {
+                    const outcome = (run.instance_outcomes || [])[index];
+                    if (!outcome) {
+                        return;
+                    }
+                    rewardValues.push(Number(outcome.reward ?? 0));
+                    if (outcome.gain !== null && outcome.gain !== undefined) {
+                        gainValues.push(Number(outcome.gain));
+                    }
+                });
+
+                meanRewardByIndex.push(
+                    rewardValues.length
+                        ? rewardValues.reduce((sum, value) => sum + value, 0) / rewardValues.length
+                        : null
+                );
+                meanGainByIndex.push(
+                    gainValues.length
+                        ? gainValues.reduce((sum, value) => sum + value, 0) / gainValues.length
+                        : null
+                );
+            }
+
+            const cumulativeMeanGainByIndex = [];
+            let runningGain = 0;
+            let runningCount = 0;
+            meanGainByIndex.forEach((value) => {
+                if (value === null) {
+                    cumulativeMeanGainByIndex.push(null);
+                    return;
+                }
+                runningGain += value;
+                runningCount += 1;
+                cumulativeMeanGainByIndex.push(runningGain / runningCount);
+            });
+
+            const aggregate = {
+                mean_reward_by_index: meanRewardByIndex,
+                mean_gain_by_index: meanGainByIndex,
+                cumulative_mean_gain_by_index: cumulativeMeanGainByIndex,
+                final_cumulative_mean_gain:
+                    cumulativeMeanGainByIndex.filter((value) => value !== null).at(-1) ?? 0,
+            };
+            return aggregate;
+        }
+
+        function getEntryCost(entry) {
+            if (!entry) {
+                return null;
+            }
+            return entry.execution?.usage?.interaction?.cost_usd
+                ?? entry.aggregate?.total_cost
+                ?? null;
+        }
+
+        function getRunningTotalCost(model) {
+            if (!model) {
+                return null;
+            }
+            const costs = [];
+            const baselineCost = getEntryCost(model.baseline);
+            if (baselineCost !== null && baselineCost !== undefined) {
+                costs.push(Number(baselineCost));
+            }
+            (model.runs || []).forEach((run) => {
+                const runCost = getEntryCost(run);
+                if (runCost !== null && runCost !== undefined) {
+                    costs.push(Number(runCost));
+                }
+            });
+            if (!costs.length) {
+                return null;
+            }
+            return costs.reduce((sum, value) => sum + value, 0);
+        }
+
+        function buildModelFromSummary(summary) {
+            if (!summary) {
+                return null;
+            }
+
+            const baselineOutcomes = summary.baseline?.instance_outcomes || [];
+            const runs = (summary.runs || []).map((run) => {
+                const instanceOutcomes = Array.isArray(run.instance_outcomes) && run.instance_outcomes.length
+                    ? run.instance_outcomes
+                    : enrichRunOutcomesWithBaseline(baselineOutcomes, run.execution?.instance_outcomes || []);
+                const loadedTrace = state.fetchedRunTraces.get(run.run_index) || null;
+                return {
+                    ...run,
+                    instance_outcomes: instanceOutcomes,
+                    aggregate: run.aggregate || summarizeOutcomes(instanceOutcomes),
+                    live_trace: loadedTrace,
+                };
+            });
+
+            return {
+                source: "summary",
+                status: summary.status || "completed",
+                phase: summary.status === "completed" ? "completed" : "running",
+                task: summary.task || {},
+                system: summary.system || {},
+                task_brief: summary.task_brief || null,
+                baseline: summary.baseline
+                    ? {
+                        ...summary.baseline,
+                        aggregate: summarizeOutcomes(baselineOutcomes),
+                    }
+                    : null,
+                runs,
+                aggregate: summary.aggregate || buildAggregateFromRuns(baselineOutcomes, runs),
+                summaryPath: summary.summary_path || null,
+            };
+        }
+
+        function buildModelFromLive(manifest) {
+            if (!manifest) {
+                return null;
+            }
+            const baselineTrace = state.fetchedBaselineTrace;
+            const baselineOutcomes = baselineTrace?.instance_outcomes || [];
+            const runs = (manifest.runs || []).map((entry) => {
+                const trace = state.fetchedRunTraces.get(entry.run_index) || null;
+                const instanceOutcomes = enrichRunOutcomesWithBaseline(
+                    baselineOutcomes,
+                    trace?.instance_outcomes || []
+                );
+                return {
+                    run_index: entry.run_index,
+                    trace_path: entry.trace_path,
+                    status: trace?.status || "pending",
+                    execution: trace?.execution || null,
+                    instance_outcomes: instanceOutcomes,
+                    aggregate: summarizeOutcomes(instanceOutcomes),
+                    live_trace: trace,
+                };
+            });
+
+            return {
+                source: "live",
+                status: manifest.status || "running",
+                phase: manifest.phase || "running",
+                task: manifest.task || {},
+                system: manifest.system || {},
+                task_brief: manifest.task_brief || null,
+                baseline: baselineTrace
+                    ? {
+                        trace_path: manifest.baseline?.trace_path,
+                        status: baselineTrace.status,
+                        execution: baselineTrace.execution,
+                        instance_outcomes: baselineOutcomes,
+                        aggregate: summarizeOutcomes(baselineOutcomes),
+                        live_trace: baselineTrace,
+                    }
+                    : null,
+                runs,
+                aggregate: buildAggregateFromRuns(baselineOutcomes, runs),
+                summaryPath: manifest.summary_path || null,
+            };
+        }
+
+        function getActiveModel() {
+            if (state.mode === "live") {
+                return buildModelFromLive(state.liveManifest);
+            }
+            if (state.summaryData) {
+                return buildModelFromSummary(state.summaryData);
+            }
+            return null;
+        }
+
+        function getSelectedTrace(model) {
+            if (state.manualTraceData) {
+                return state.manualTraceData;
+            }
+            if (!model || state.selectedRunIndex === null) {
+                return null;
+            }
+            if (model.source === "live") {
+                return state.fetchedRunTraces.get(state.selectedRunIndex) || null;
+            }
+            const run = model.runs.find((entry) => entry.run_index === state.selectedRunIndex);
+            if (run && run.live_trace) {
+                return run.live_trace;
+            }
+            return null;
+        }
+
+        function getExpectedSequenceLength(model) {
+            const candidateKeys = [
+                "expected_num_instances",
+                "expected_sequence_length",
+                "num_hands",
+                "num_instances",
+                "num_problems",
+                "num_issues",
+                "num_reactions",
+                "n_instances",
+            ];
+
+            const paramSources = [
+                model?.task?.params,
+                model?.baseline?.live_trace?.task?.params,
+                ...(model?.runs || []).map((run) => run.live_trace?.task?.params),
+            ].filter(Boolean);
+
+            for (const params of paramSources) {
+                for (const key of candidateKeys) {
+                    const value = Number(params[key]);
+                    if (Number.isFinite(value) && value > 0) {
+                        return value;
+                    }
+                }
+            }
+            return model?.aggregate?.mean_reward_by_index?.length
+                || model?.baseline?.instance_outcomes?.length
+                || Math.max(0, ...((model?.runs || []).map((run) => run.instance_outcomes?.length || 0)))
+                || 0;
+        }
+
+        function buildSystemLabel(system) {
+            const name = system?.name || "unknown system";
+            const params = system?.params || {};
+
+            if (params.model) {
+                return `${name} · ${params.model}`;
+            }
+
+            if (params.generator_model || params.reflector_model || params.curator_model) {
+                const generator = params.generator_model || null;
+                const reflector = params.reflector_model || null;
+                const curator = params.curator_model || null;
+                const unique = [...new Set([generator, reflector, curator].filter(Boolean))];
+                if (unique.length === 1) {
+                    return `${name} · ${unique[0]}`;
+                }
+                const parts = [];
+                if (generator) {
+                    parts.push(`gen ${generator}`);
+                }
+                if (reflector) {
+                    parts.push(`refl ${reflector}`);
+                }
+                if (curator) {
+                    parts.push(`cur ${curator}`);
+                }
+                return `${name} · ${parts.join(" / ")}`;
+            }
+
+            return name;
+        }
+
+        function renderOverview(model) {
+            if (!model) {
+                dom.overviewCopy.textContent = "No benchmark loaded yet.";
+                dom.overviewGrid.innerHTML = `<div class="empty">Load a summary or live manifest to populate benchmark metrics.</div>`;
+                return;
+            }
+
+            const aggregate = model.aggregate || {};
+            const cumulativeReward = getAggregateCumulativeReward(aggregate) ?? 0;
+            const cumulativeGain = getAggregateCumulativeGain(aggregate);
+            const completedRuns = model.runs.filter((run) => run.status === "completed").length;
+            const currentRuns = model.runs.length;
+            const selectedRun = model.runs.find((run) => run.run_index === state.selectedRunIndex) || model.runs[0] || null;
+            const selectedRunExecution = selectedRun?.execution || null;
+            const avgLatency = selectedRunExecution?.avg_response_seconds ?? null;
+            const runningTotalCost = getRunningTotalCost(model);
+            const sequenceLength = getExpectedSequenceLength(model);
+            const baselineCompleted = model.baseline?.execution?.instances_completed
+                ?? model.baseline?.instance_outcomes?.length
+                ?? 0;
+            const baselineTotal = model.baseline?.execution?.instances_total
+                ?? (model.baseline ? sequenceLength : null);
+            const baselineBlocked = model.baseline?.execution?.instances_blocked
+                ?? model.baseline?.blocked_instances?.length
+                ?? 0;
+            const baselineCoverage = baselineTotal
+                ? `${baselineCompleted}/${baselineTotal}`
+                : (model.baseline ? String(baselineCompleted) : "n/a");
+
+            const taskName = model.task?.name || "unknown task";
+            const systemLabel = buildSystemLabel(model.system);
+            const scheduleId = model.schedule || model.task?.params?.schedule || model.task?.params?.rollout_schedule || "";
+            dom.overviewCopy.textContent = `${taskName} on ${systemLabel} · ${model.phase}`;
+
+            const cards = [
+                {
+                    label: "Final / Current Cumulative Gain",
+                    value: cumulativeGain !== null ? formatSigned(cumulativeGain) : "n/a",
+                    sub: cumulativeGain !== null
+                        ? (model.status === "completed" ? "completed benchmark total" : "live prefix total")
+                        : "baseline not run",
+                },
+                {
+                    label: "Final / Current Cumulative Reward",
+                    value: formatSigned(cumulativeReward),
+                    sub: model.status === "completed" ? "completed benchmark total" : "live prefix total",
+                },
+                {
+                    label: "Sequence Length",
+                    value: String(sequenceLength),
+                    sub: "baseline-defined instance count",
+                },
+                {
+                    label: "Baseline Coverage",
+                    value: baselineCoverage,
+                    sub: model.baseline
+                        ? (baselineBlocked ? `${baselineBlocked} blocked` : "all baseline instances available")
+                        : "baseline not run",
+                },
+                {
+                    label: "Completed Runs",
+                    value: `${completedRuns}/${currentRuns}`,
+                    sub: "runs with finished traces",
+                },
+                {
+                    label: "Schedule",
+                    value: scheduleId || "—",
+                    sub: scheduleId ? "benchmark schedule" : "no schedule specified",
+                },
+                {
+                    label: "Phase / Status",
+                    value: `${model.phase}`,
+                    sub: model.status || "unknown",
+                },
+                {
+                    label: "Avg Latency",
+                    value: formatDuration(avgLatency),
+                    sub: "selected run execution metadata",
+                },
+                {
+                    label: "Running Total Cost",
+                    value: formatCurrency(runningTotalCost),
+                    sub: "sum of baseline and run costs available so far",
+                },
+            ];
+
+            dom.overviewGrid.innerHTML = cards.map((card) => `
+                <div class="metric-card">
+                    <div class="metric-label">${escapeHtml(card.label)}</div>
+                    <div class="metric-value">${escapeHtml(card.value)}</div>
+                    <div class="metric-sub">${escapeHtml(card.sub)}</div>
+                </div>
+            `).join("");
+        }
+
+        function renderBrief(model) {
+            const brief = model?.task_brief;
+            if (!brief) {
+                dom.briefMount.className = "empty";
+                dom.briefMount.innerHTML = "No task brief found in this artifact.";
+                return;
+            }
+            dom.briefMount.className = "brief-box";
+            const constraints = Array.isArray(brief.constraints) && brief.constraints.length
+                ? `<dt>Constraints</dt><dd>${brief.constraints.map((item) => escapeHtml(item)).join("<br>")}</dd>`
+                : "";
+            dom.briefMount.innerHTML = `
+                <dl>
+                    <div>
+                        <dt>Objective</dt>
+                        <dd>${escapeHtml(brief.objective || "n/a")}</dd>
+                    </div>
+                    <div>
+                        <dt>Instance Unit</dt>
+                        <dd>${escapeHtml(brief.instance_unit || "n/a")}</dd>
+                    </div>
+                    <div>
+                        <dt>Reward</dt>
+                        <dd>${escapeHtml(brief.reward_definition || "n/a")}</dd>
+                    </div>
+                    <div>
+                        <dt>Completion</dt>
+                        <dd>${escapeHtml(brief.completion_definition || "n/a")}</dd>
+                    </div>
+                    <div>${constraints}</div>
+                </dl>
+            `;
+        }
+
+        function formatChartTooltipValue(value) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            const number = Number(value);
+            return `${number >= 0 ? "+" : ""}${number.toFixed(4)}`;
+        }
+
+        function positionChartTooltip(container, tooltip, clientX, clientY) {
+            const rect = container.getBoundingClientRect();
+            const margin = 10;
+            let left = clientX - rect.left;
+            let top = clientY - rect.top;
+
+            tooltip.style.left = `${left}px`;
+            tooltip.style.top = `${top}px`;
+            tooltip.classList.remove("anchored-below");
+            tooltip.classList.add("visible");
+
+            const tooltipRect = tooltip.getBoundingClientRect();
+            const halfWidth = tooltipRect.width / 2;
+
+            if (left - halfWidth < margin) {
+                left = halfWidth + margin;
+            } else if (left + halfWidth > rect.width - margin) {
+                left = rect.width - halfWidth - margin;
+            }
+
+            if (top - tooltipRect.height - 12 < margin) {
+                tooltip.classList.add("anchored-below");
+            }
+
+            tooltip.style.left = `${left}px`;
+            tooltip.style.top = `${top}px`;
+        }
+
+        function renderLineChart(container, options) {
+            const {
+                title = "",
+                xPrefix = "Index",
+                series = [],
+            } = options;
+            const validSeries = series.filter((entry) => Array.isArray(entry.values) && entry.values.some((value) => value !== null && value !== undefined));
+            if (!validSeries.length) {
+                container.innerHTML = `<div class="chart-empty">No data available.</div>`;
+                return;
+            }
+
+            const points = [];
+            validSeries.forEach((entry) => {
+                entry.values.forEach((value, index) => {
+                    if (value !== null && value !== undefined) {
+                        points.push({ x: index, y: Number(value) });
+                    }
+                });
+            });
+
+            const width = 660;
+            const height = 252;
+            const padding = { top: 18, right: 18, bottom: 34, left: 64 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            const minY = points.length ? Math.min(...points.map((point) => point.y)) : 0;
+            const maxY = points.length ? Math.max(...points.map((point) => point.y)) : 1;
+            const spreadY = maxY - minY || 1;
+            const minX = 0;
+            const maxX = Math.max(...points.map((point) => point.x), 0);
+
+            const scaleX = (index) => padding.left + (maxX === 0 ? chartWidth / 2 : (index / maxX) * chartWidth);
+            const scaleY = (value) => padding.top + chartHeight - ((value - minY) / spreadY) * chartHeight;
+
+            const grid = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+                const value = minY + spreadY * ratio;
+                const y = scaleY(value);
+                return `
+                    <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="rgba(95,106,97,0.18)" stroke-width="1"/>
+                    <text x="${padding.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="#5f6a61">${Number(value).toFixed(2)}</text>
+                `;
+            }).join("");
+
+            const xTicks = Array.from({ length: Math.min(maxX + 1, 6) }, (_, index) => {
+                const tickIndex = maxX === 0 ? 0 : Math.round((maxX * index) / Math.max(1, Math.min(maxX, 5)));
+                const x = scaleX(tickIndex);
+                return `
+                    <line x1="${x}" y1="${padding.top + chartHeight}" x2="${x}" y2="${padding.top + chartHeight + 6}" stroke="rgba(95,106,97,0.28)" stroke-width="1"/>
+                    <text x="${x}" y="${height - 4}" text-anchor="middle" font-size="11" fill="#5f6a61">${tickIndex + 1}</text>
+                `;
+            }).join("");
+
+            const polylines = validSeries.map((entry) => {
+                const path = entry.values
+                    .map((value, index) => {
+                        if (value === null || value === undefined) {
+                            return null;
+                        }
+                        return `${scaleX(index)},${scaleY(Number(value))}`;
+                    })
+                    .filter(Boolean)
+                    .join(" ");
+                return `
+                    <polyline fill="none" stroke="${entry.color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${path}"></polyline>
+                `;
+            }).join("");
+
+            const markers = validSeries.map((entry) => {
+                const definedPoints = entry.values
+                    .map((value, index) => ({ value, index }))
+                    .filter((pair) => pair.value !== null && pair.value !== undefined);
+                const lastIndex = definedPoints.at(-1)?.index ?? null;
+                return definedPoints.map((pair) => {
+                    const cx = scaleX(pair.index);
+                    const cy = scaleY(Number(pair.value));
+                    const radius = pair.index === lastIndex ? 4.5 : 3.4;
+                    const opacity = pair.index === lastIndex ? 1 : 0.88;
+                    const tooltip = `${entry.label} | ${xPrefix} ${pair.index + 1} | ${formatChartTooltipValue(pair.value)}`;
+                    return `
+                        <g class="chart-point" tabindex="0" data-series-label="${escapeHtml(entry.label)}" data-index="${pair.index + 1}" data-value="${formatChartTooltipValue(pair.value)}">
+                            <title>${escapeHtml(tooltip)}</title>
+                            <circle class="chart-point-hit" cx="${cx}" cy="${cy}" r="11"></circle>
+                            <circle class="chart-point-dot" cx="${cx}" cy="${cy}" r="${radius}" fill="${entry.color}" opacity="${opacity}" stroke="#fffdf8" stroke-width="2"></circle>
+                        </g>
+                    `;
+                }).join("");
+            }).join("");
+
+            container.innerHTML = `
+                <svg viewBox="0 0 ${width} ${height}" width="100%" height="252" role="img" aria-label="${escapeHtml(title)}">
+                    <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="rgba(11,107,87,0.04)" rx="12"></rect>
+                    ${grid}
+                    <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${width - padding.right}" y2="${padding.top + chartHeight}" stroke="rgba(95,106,97,0.35)" stroke-width="1.2"></line>
+                    <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}" stroke="rgba(95,106,97,0.35)" stroke-width="1.2"></line>
+                    ${xTicks}
+                    ${polylines}
+                    ${markers}
+                    <text x="${width / 2}" y="${height - 4}" text-anchor="middle" font-size="11" fill="#5f6a61">${escapeHtml(xPrefix)}</text>
+                </svg>
+                <div class="chart-tooltip" aria-hidden="true"></div>
+                <div class="chart-legend">
+                    ${validSeries.map((entry) => `
+                        <span class="legend-chip">
+                            <span class="legend-line" style="background:${entry.color}"></span>
+                            ${escapeHtml(entry.label)}
+                        </span>
+                    `).join("")}
+                </div>
+            `;
+
+            const tooltip = container.querySelector(".chart-tooltip");
+            const chartPoints = container.querySelectorAll(".chart-point");
+            const hideTooltip = () => {
+                if (!tooltip) {
+                    return;
+                }
+                tooltip.classList.remove("visible", "anchored-below");
+            };
+
+            chartPoints.forEach((point) => {
+                const renderTooltip = (clientX, clientY) => {
+                    if (!tooltip) {
+                        return;
+                    }
+                    tooltip.innerHTML = `
+                        <strong>${escapeHtml(point.dataset.seriesLabel || "Series")}</strong>
+                        <div>${escapeHtml(`${xPrefix} ${point.dataset.index || "n/a"}`)}</div>
+                        <div>${escapeHtml(`Value ${point.dataset.value || "n/a"}`)}</div>
+                    `;
+                    positionChartTooltip(container, tooltip, clientX, clientY);
+                };
+
+                point.addEventListener("mouseenter", (event) => {
+                    renderTooltip(event.clientX, event.clientY);
+                });
+                point.addEventListener("mousemove", (event) => {
+                    renderTooltip(event.clientX, event.clientY);
+                });
+                point.addEventListener("mouseleave", hideTooltip);
+                point.addEventListener("focus", () => {
+                    const dot = point.querySelector(".chart-point-dot");
+                    if (!dot) {
+                        return;
+                    }
+                    const cx = Number(dot.getAttribute("cx") || 0);
+                    const cy = Number(dot.getAttribute("cy") || 0);
+                    const rect = container.getBoundingClientRect();
+                    renderTooltip(rect.left + cx, rect.top + cy);
+                });
+                point.addEventListener("blur", hideTooltip);
+            });
+        }
+
+        function renderCharts(model) {
+            const aggregate = model?.aggregate;
+            if (!aggregate) {
+                dom.curveMetrics.className = "empty";
+                dom.curveMetrics.innerHTML = "Load benchmark data to populate the live headline metrics.";
+                [dom.rewardChart, dom.gainChart].forEach((container) => {
+                    container.innerHTML = `<div class="chart-empty">Load benchmark data to render charts.</div>`;
+                });
+                return;
+            }
+
+            const cumulativeGain = getAggregateCumulativeGain(aggregate);
+            const hasGainData = cumulativeGain !== null;
+            const cumulativeReward = getAggregateCumulativeReward(aggregate) ?? 0;
+            const meanGainSeries = (aggregate.mean_gain_by_index || [])
+                .map((value) => value === null || value === undefined ? null : Number(value));
+
+            dom.curveMetrics.className = "curve-metrics";
+            dom.curveMetrics.innerHTML = [
+                {
+                    label: "Final / Current Cumulative Gain",
+                    value: hasGainData ? formatSigned(cumulativeGain) : "n/a",
+                    sub: hasGainData
+                        ? (model?.status === "completed" ? "headline benchmark total" : "live-updating prefix total")
+                        : "baseline not run",
+                },
+                {
+                    label: "Final / Current Cumulative Reward",
+                    value: formatSigned(cumulativeReward),
+                    sub: model?.status === "completed" ? "sum of mean reward by index" : "live prefix sum of mean reward by index",
+                },
+            ].map((card) => `
+                <div class="metric-card">
+                    <div class="metric-label">${escapeHtml(card.label)}</div>
+                    <div class="metric-value">${escapeHtml(card.value)}</div>
+                    <div class="metric-sub">${escapeHtml(card.sub)}</div>
+                </div>
+            `).join("");
+
+            renderLineChart(dom.rewardChart, {
+                title: "Mean Reward By Index",
+                series: [
+                    {
+                        label: "Mean run reward",
+                        color: "#0b6b57",
+                        values: aggregate.mean_reward_by_index || [],
+                    },
+                ],
+            });
+
+            if (hasGainData) {
+                renderLineChart(dom.gainChart, {
+                    title: "Mean Gain By Index",
+                    series: [
+                        {
+                            label: "Mean gain",
+                            color: "#9d4d3a",
+                            values: meanGainSeries,
+                        },
+                    ],
+                });
+            } else {
+                dom.gainChart.innerHTML = `<div class="chart-empty">No gain data — baseline was not run or no matched baseline instances completed.</div>`;
+            }
+        }
+
+        function renderRuns(model) {
+            if (!model || !model.runs.length) {
+                dom.runsTableBody.innerHTML = `<tr><td colspan="8" class="empty">No runs loaded.</td></tr>`;
+                return;
+            }
+
+            if (state.selectedRunIndex === null && model.runs.length) {
+                state.selectedRunIndex = model.runs[0].run_index;
+            }
+
+            dom.runsTableBody.innerHTML = model.runs.map((run) => {
+                const aggregate = run.aggregate || {};
+                const execution = run.execution || {};
+                const usage = execution.usage?.interaction || {};
+                const progressCount = run.instance_outcomes?.length || 0;
+                const sequenceLength = getExpectedSequenceLength(model) || progressCount;
+                const cumulativeGain = getRunCumulativeGain(aggregate);
+                const buttonClass = run.run_index === state.selectedRunIndex ? "run-select selected" : "run-select";
+                return `
+                    <tr>
+                        <td>Run ${run.run_index + 1}</td>
+                        <td>${escapeHtml(run.status || "unknown")}</td>
+                        <td>${progressCount}/${sequenceLength}</td>
+                        <td>${escapeHtml(cumulativeGain !== null ? formatSigned(cumulativeGain) : "n/a")}</td>
+                        <td>${escapeHtml(formatSigned(aggregate.total_reward ?? 0))}</td>
+                        <td>${escapeHtml(formatDuration(execution.avg_response_seconds ?? null))}</td>
+                        <td>${escapeHtml(formatCurrency(usage.cost_usd ?? null))}</td>
+                        <td><button class="${buttonClass}" data-run-index="${run.run_index}">Inspect</button></td>
+                    </tr>
+                `;
+            }).join("");
+
+            dom.runsTableBody.querySelectorAll("button[data-run-index]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    state.selectedRunIndex = Number(button.dataset.runIndex);
+                    if (!state.manualTraceData) {
+                        const modelNow = getActiveModel();
+                        const selectedRun = modelNow?.runs.find((run) => run.run_index === state.selectedRunIndex);
+                        if (selectedRun?.trace_path && (state.mode === "live" || state.summaryLoadedFromUrl)) {
+                            loadTraceFromUrl(selectedRun.trace_path, state.selectedRunIndex);
+                        }
+                    }
+                    renderAll();
+                });
+            });
+        }
+
+        function renderProgress(model) {
+            if (!model) {
+                dom.progressSummary.className = "empty";
+                dom.progressSummary.innerHTML = "No progress data loaded.";
+                return;
+            }
+
+            const total = getExpectedSequenceLength(model);
+            const baseline = model.baseline;
+            const rows = [];
+
+            if (baseline) {
+                const baselineDone = baseline.execution?.instances_completed
+                    ?? baseline.instance_outcomes?.length
+                    ?? 0;
+                const baselineTotal = baseline.execution?.instances_total ?? total;
+                const baselineBlocked = baseline.execution?.instances_blocked
+                    ?? baseline.blocked_instances?.length
+                    ?? 0;
+                const baselineCost = baseline.execution?.usage?.interaction?.cost_usd
+                    ?? baseline.aggregate?.total_cost
+                    ?? null;
+                rows.push({
+                    label: "Baseline",
+                    status: baseline.status || (
+                        baselineTotal > 0
+                            ? (baselineDone >= baselineTotal ? "completed" : baselineDone > 0 ? "running" : "pending")
+                            : "completed"
+                    ),
+                    completed: baselineDone,
+                    total: baselineTotal,
+                    meta: `reset-each-instance · reward ${formatSigned(baseline.aggregate?.total_reward || 0)}${baselineCost !== null ? ` · cost ${formatCurrency(baselineCost)}` : ""}${baselineBlocked ? ` · blocked ${baselineBlocked}` : ""}`,
+                });
+            }
+
+            (model.runs || []).forEach((run) => {
+                const completed = run.instance_outcomes?.length || 0;
+                const aggregate = run.aggregate || {};
+                const runCost = run.execution?.usage?.interaction?.cost_usd
+                    ?? aggregate.total_cost
+                    ?? null;
+                rows.push({
+                        label: `Run ${run.run_index + 1}`,
+                    status: run.status || "pending",
+                    completed,
+                    total,
+                    meta: `gain ${formatSigned(getRunCumulativeGain(aggregate))} · reward ${formatSigned(aggregate.total_reward || 0)}${runCost !== null ? ` · cost ${formatCurrency(runCost)}` : ""}`,
+                });
+            });
+
+            if (!rows.length) {
+                dom.progressSummary.className = "empty";
+                dom.progressSummary.innerHTML = "No progress data loaded.";
+                return;
+            }
+
+            dom.progressSummary.className = "progress-stack";
+            dom.progressSummary.innerHTML = rows.map((row) => {
+                const progress = row.total > 0 ? Math.max(0, Math.min(100, (row.completed / row.total) * 100)) : 0;
+                const fillClass = row.status === "completed"
+                    ? "completed"
+                    : row.status === "running"
+                        ? "running"
+                        : "pending";
+                const countLabel = row.total > 0
+                    ? `${row.completed}/${row.total}`
+                    : `${row.completed}`;
+                return `
+                    <div class="progress-row">
+                        <div class="progress-head">
+                            <div class="progress-title">${escapeHtml(row.label)}</div>
+                            <div class="progress-meta">${escapeHtml(row.status)} · ${escapeHtml(countLabel)}</div>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill ${fillClass}" style="width: ${progress}%"></div>
+                        </div>
+                        <div class="progress-meta">${escapeHtml(row.meta)}</div>
+                    </div>
+                `;
+            }).join("");
+        }
+
+        function groupInteractionsByInstance(trace, model) {
+            if (!trace || !Array.isArray(trace.interactions)) {
+                return [];
+            }
+            const selectedRun = model?.runs.find((run) => run.run_index === state.selectedRunIndex) || null;
+            const outcomeMap = new Map((selectedRun?.instance_outcomes || []).map((outcome) => {
+                const key = `${outcome.instance_index}:${outcome.instance_id}`;
+                return [key, outcome];
+            }));
+
+            const groups = new Map();
+            trace.interactions.forEach((interaction) => {
+                const query = interaction.query || {};
+                const instanceId = query.instance_id ?? "unknown";
+                const instanceIndex = query.instance_index ?? -1;
+                const key = `${instanceIndex}:${instanceId}`;
+                if (!groups.has(key)) {
+                    groups.set(key, {
+                        key,
+                        instance_id: instanceId,
+                        instance_index: instanceIndex,
+                        interactions: [],
+                        outcome: outcomeMap.get(key) || null,
+                    });
+                }
+                groups.get(key).interactions.push(interaction);
+            });
+
+            return [...groups.values()].sort((a, b) => a.instance_index - b.instance_index);
+        }
+
+        function captureOpenInstanceKeys() {
+            state.openInstanceKeys = new Set(
+                [...dom.instanceList.querySelectorAll("details.instance-card[open]")]
+                    .map((element) => element.dataset.instanceKey)
+                    .filter(Boolean)
+            );
+            state.openMetadataKeys = new Set(
+                [...dom.instanceList.querySelectorAll("details.metadata-toggle[open]")]
+                    .map((element) => element.dataset.metadataKey)
+                    .filter(Boolean)
+            );
+        }
+
+        function renderTrace(model) {
+            captureOpenInstanceKeys();
+            const trace = getSelectedTrace(model);
+            if (!trace) {
+                dom.traceSummaryMount.className = "empty";
+                dom.traceSummaryMount.innerHTML = "Select a run or load a trace file to inspect interactions.";
+                dom.instanceList.innerHTML = "";
+                dom.instanceJump.innerHTML = `<option value="">Select an instance</option>`;
+                return;
+            }
+
+            const execution = trace.execution || {};
+            const usage = execution.usage?.interaction || {};
+            dom.traceSummaryMount.className = "trace-summary";
+            dom.traceSummaryMount.innerHTML = `
+                <div class="trace-pill">Trace Status<strong>${escapeHtml(trace.status || "unknown")}</strong></div>
+                <div class="trace-pill">Phase<strong>${escapeHtml(trace.phase || "unknown")}</strong></div>
+                <div class="trace-pill">Interactions<strong>${escapeHtml(String(execution.total_interactions || trace.interactions?.length || 0))}</strong></div>
+                <div class="trace-pill">Avg Response<strong>${escapeHtml(formatDuration(execution.avg_response_seconds ?? null))}</strong></div>
+                <div class="trace-pill">Cost<strong>${escapeHtml(formatCurrency(usage.cost_usd ?? null))}</strong></div>
+                <div class="trace-pill">Run Index<strong>${escapeHtml(String(execution.run_index ?? "n/a"))}</strong></div>
+            `;
+
+            const groups = groupInteractionsByInstance(trace, model);
+            const search = dom.searchInput.value.trim().toLowerCase();
+            const successFilter = dom.successFilter.value;
+
+            const filteredGroups = groups.filter((group) => {
+                const outcome = group.outcome;
+                if (successFilter === "success" && outcome?.success !== true) {
+                    return false;
+                }
+                if (successFilter === "failure" && outcome?.success !== false) {
+                    return false;
+                }
+                if (!search) {
+                    return true;
+                }
+                const bundleText = [
+                    group.instance_id,
+                    ...group.interactions.map((interaction) => interaction.query?.prompt || ""),
+                    ...group.interactions.map((interaction) => JSON.stringify(interaction.response?.action || {})),
+                    ...group.interactions.map((interaction) => interaction.observation?.content || ""),
+                ].join(" ").toLowerCase();
+                return bundleText.includes(search);
+            });
+
+            dom.instanceJump.innerHTML = [
+                `<option value="">Select an instance</option>`,
+                ...groups.map((group) => `
+                    <option value="${escapeHtml(group.key)}">
+                        ${escapeHtml(`Instance ${group.instance_index + 1} · ${group.instance_id}`)}
+                    </option>
+                `),
+            ].join("");
+
+            if (!filteredGroups.length) {
+                dom.instanceList.innerHTML = `<div class="empty">No instances match the current filters.</div>`;
+                return;
+            }
+
+            dom.instanceList.innerHTML = filteredGroups.map((group) => {
+                const outcome = group.outcome || {};
+                const successPill = outcome.success === true
+                    ? `<span class="pill">success</span>`
+                    : outcome.success === false
+                        ? `<span class="pill fail">failure</span>`
+                        : "";
+                const gainPill = outcome.gain !== null && outcome.gain !== undefined
+                    ? `<span class="pill ${Number(outcome.gain) < 0 ? "fail" : ""}">gain ${escapeHtml(formatSigned(outcome.gain))}</span>`
+                    : "";
+                const rewardPill = outcome.reward !== null && outcome.reward !== undefined
+                    ? `<span class="pill ${Number(outcome.reward) < 0 ? "warn" : ""}">reward ${escapeHtml(formatSigned(outcome.reward))}</span>`
+                    : "";
+                const metaBlocks = [
+                    ["Instance ID", group.instance_id],
+                    ["Instance Index", group.instance_index + 1],
+                    ["Interactions", group.interactions.length],
+                    ["Baseline Reward", outcome.baseline_reward !== undefined ? formatSigned(outcome.baseline_reward) : "n/a"],
+                ].map(([label, value]) => `
+                    <div class="meta-box">
+                        <span>${escapeHtml(label)}</span>
+                        ${escapeHtml(String(value))}
+                    </div>
+                `).join("");
+
+                const metadataJson = outcome.metadata
+                    ? `<div class="meta-box"><span>Outcome Metadata</span><div class="json-chip">${escapeHtml(JSON.stringify(outcome.metadata))}</div></div>`
+                    : "";
+
+                const steps = group.interactions.map((interaction) => {
+                    const responseAction = interaction.response?.action ?? {};
+                    const responseMetadata = interaction.response?.metadata;
+                    const hasMetadata = responseMetadata && Object.keys(responseMetadata).length > 0;
+                    const timing = interaction.timing || {};
+                    const usage = interaction.usage?.interaction || {};
+                    const metadataKey = `${group.key}:${interaction.step_number}`;
+                    const metadataBlock = hasMetadata ? `
+                        <details class="metadata-toggle" data-metadata-key="${escapeHtml(metadataKey)}">
+                            <summary>Response Metadata</summary>
+                            <pre>${renderPre(JSON.stringify(responseMetadata, null, 2))}</pre>
+                        </details>
+                    ` : "";
+                    return `
+                        <div class="step-card">
+                            <div class="step-head">
+                                <div class="step-title">Step ${escapeHtml(String(interaction.step_number || "?"))}</div>
+                                <div class="step-meta">
+                                    latency ${escapeHtml(formatDuration(timing.response_latency_seconds ?? null))}
+                                    · cost ${escapeHtml(formatCurrency(usage.cost_usd ?? null))}
+                                </div>
+                            </div>
+                            <div class="step-grid">
+                                <div class="block">
+                                    <h4>Prompt</h4>
+                                    <pre>${renderPre(interaction.query?.prompt || "")}</pre>
+                                </div>
+                                <div class="block">
+                                    <h4>Action</h4>
+                                    <pre>${renderPre(typeof responseAction === "string" ? responseAction : JSON.stringify(responseAction, null, 2))}</pre>
+                                </div>
+                                <div class="block">
+                                    <h4>Observation</h4>
+                                    <pre>${renderPre(interaction.observation?.content || "")}</pre>
+                                </div>
+                            </div>
+                            ${metadataBlock}
+                        </div>
+                    `;
+                }).join("");
+
+                return `
+                    <details class="instance-card" data-instance-key="${escapeHtml(group.key)}">
+                        <summary>
+                            <div class="instance-top">
+                                <div class="instance-title">Instance ${escapeHtml(String(group.instance_index + 1))} · ${escapeHtml(group.instance_id)}</div>
+                                <div class="instance-meta">
+                                    ${rewardPill}
+                                    ${gainPill}
+                                    ${successPill}
+                                    <span class="pill warn">${escapeHtml(`${group.interactions.length} interactions`)}</span>
+                                </div>
+                            </div>
+                        </summary>
+                        <div class="instance-body">
+                            <div class="meta-grid">
+                                ${metaBlocks}
+                                ${metadataJson}
+                            </div>
+                            <div class="step-list">${steps}</div>
+                        </div>
+                    </details>
+                `;
+            }).join("");
+
+            const jumpTarget = dom.instanceJump.value;
+            const openKeys = new Set(state.openInstanceKeys);
+            if (jumpTarget) {
+                openKeys.add(jumpTarget);
+            }
+
+            dom.instanceList.querySelectorAll("details.instance-card").forEach((item) => {
+                if (openKeys.has(item.dataset.instanceKey)) {
+                    item.open = true;
+                }
+                item.addEventListener("toggle", () => {
+                    const key = item.dataset.instanceKey;
+                    if (!key) {
+                        return;
+                    }
+                    if (item.open) {
+                        state.openInstanceKeys.add(key);
+                    } else {
+                        state.openInstanceKeys.delete(key);
+                    }
+                });
+            });
+
+            dom.instanceList.querySelectorAll("details.metadata-toggle[data-metadata-key]").forEach((item) => {
+                if (state.openMetadataKeys.has(item.dataset.metadataKey)) {
+                    item.open = true;
+                }
+                item.addEventListener("toggle", () => {
+                    const key = item.dataset.metadataKey;
+                    if (item.open) {
+                        state.openMetadataKeys.add(key);
+                    } else {
+                        state.openMetadataKeys.delete(key);
+                    }
+                });
+            });
+        }
+
+        function renderAll() {
+            const model = getActiveModel();
+            renderOverview(model);
+            renderBrief(model);
+            renderCharts(model);
+            renderRuns(model);
+            renderProgress(model);
+            renderTrace(model);
+
+            if (state.mode === "live") {
+                const status = state.liveManifest?.status || "running";
+                setStatus(status === "completed" ? "completed" : "running", `Live benchmark · ${status}`, "live");
+                dom.pollingText.textContent = status === "completed"
+                    ? "Polling is off."
+                    : `Polling every ${state.pollIntervalMs / 1000}s.`;
+            } else if (state.summaryData) {
+                setStatus("completed", "Completed summary loaded", "summary");
+                dom.pollingText.textContent = "Polling is off.";
+            } else if (state.manualTraceData) {
+                setStatus("completed", "Trace loaded", "trace");
+                dom.pollingText.textContent = "Polling is off.";
+            } else {
+                setStatus("", "Waiting for data", "idle");
+                dom.pollingText.textContent = "Polling is off.";
+            }
+        }
+
+        async function loadTraceFromUrl(tracePath, runIndex) {
+            try {
+                const trace = await fetchJson(tracePath);
+                if (runIndex !== null && runIndex !== undefined) {
+                    state.fetchedRunTraces.set(runIndex, trace);
+                } else {
+                    state.manualTraceData = trace;
+                }
+                renderAll();
+            } catch (error) {
+                console.warn(error);
+            }
+        }
+
+        async function refreshLiveData() {
+            if (!state.liveManifestUrl) {
+                return;
+            }
+            try {
+                const manifest = await fetchJson(state.liveManifestUrl);
+                state.liveManifest = manifest;
+                state.pollIntervalMs = Number(manifest.poll_interval_ms || 2000);
+                if (manifest.baseline?.trace_path) {
+                    try {
+                        state.fetchedBaselineTrace = await fetchJson(manifest.baseline.trace_path);
+                    } catch (error) {
+                        console.warn(error);
+                    }
+                }
+                await Promise.all((manifest.runs || []).map(async (entry) => {
+                    if (!entry.trace_path) {
+                        return;
+                    }
+                    try {
+                        const trace = await fetchJson(entry.trace_path);
+                        state.fetchedRunTraces.set(entry.run_index, trace);
+                    } catch (error) {
+                        console.warn(error);
+                    }
+                }));
+                if (state.selectedRunIndex === null && manifest.runs?.length) {
+                    state.selectedRunIndex = manifest.runs[0].run_index;
+                }
+                renderAll();
+                if ((manifest.status || "").toLowerCase() === "completed") {
+                    stopPolling();
+                }
+            } catch (error) {
+                // If the server has gone away but we already saw a completed status,
+                // treat the connection error as a clean finish rather than an error.
+                if ((state.liveManifest?.status || "").toLowerCase() === "completed") {
+                    stopPolling();
+                    setStatus("completed", "Live benchmark · completed", "live");
+                } else {
+                    console.error(error);
+                    setStatus("error", `Live update failed: ${error.message}`, "live");
+                }
+            }
+        }
+
+        async function loadManifestFromUrl(url) {
+            const manifest = await fetchJson(url);
+            applyManifestArtifact(manifest, url);
+            await refreshLiveData();
+            stopPolling();
+            if ((state.liveManifest?.status || "").toLowerCase() !== "completed") {
+                state.pollingTimer = setInterval(refreshLiveData, state.pollIntervalMs);
+            }
+        }
+
+        async function loadSummaryFromUrl(url) {
+            applySummaryArtifact(await fetchJson(url));
+            state.summaryLoadedFromUrl = true;
+            if (state.selectedRunIndex === null && state.summaryData.runs?.length) {
+                state.selectedRunIndex = state.summaryData.runs[0].run_index;
+            }
+            const selectedRun = state.summaryData.runs?.find((run) => run.run_index === state.selectedRunIndex);
+            if (selectedRun?.trace_path) {
+                await loadTraceFromUrl(selectedRun.trace_path, state.selectedRunIndex);
+            }
+            renderAll();
+        }
+
+        function clearState() {
+            stopPolling();
+            state.mode = "idle";
+            state.liveManifestUrl = null;
+            state.liveManifest = null;
+            state.summaryData = null;
+            state.summaryLoadedFromUrl = false;
+            state.manualTraceData = null;
+            state.fetchedRunTraces = new Map();
+            state.fetchedBaselineTrace = null;
+            state.selectedRunIndex = null;
+            state.openInstanceKeys = new Set();
+            dom.artifactFile.value = "";
+            dom.searchInput.value = "";
+            dom.successFilter.value = "all";
+            dom.instanceJump.innerHTML = `<option value="">Select an instance</option>`;
+            renderAll();
+        }
+
+        dom.artifactFile.addEventListener("change", async (event) => {
+            const file = event.target.files?.[0];
+            if (!file) {
+                return;
+            }
+            try {
+                const data = await readJsonFile(file);
+                const kind = applyArtifact(data);
+                if (
+                    kind === "manifest"
+                    && state.liveManifestUrl
+                    && (state.liveManifest?.status || "").toLowerCase() !== "completed"
+                ) {
+                    state.pollIntervalMs = Number(state.liveManifest?.poll_interval_ms || 2000);
+                    stopPolling();
+                    state.pollingTimer = setInterval(refreshLiveData, state.pollIntervalMs);
+                }
+            } catch (error) {
+                setStatus("error", error.message, "error");
+            }
+        });
+
+        dom.clearButton.addEventListener("click", clearState);
+        dom.searchInput.addEventListener("input", renderAll);
+        dom.successFilter.addEventListener("change", renderAll);
+        dom.instanceJump.addEventListener("change", () => {
+            const target = dom.instanceJump.value;
+            if (!target) {
+                return;
+            }
+            const element = dom.instanceList.querySelector(`[data-instance-key="${CSS.escape(target)}"]`);
+            if (element) {
+                element.open = true;
+                state.openInstanceKeys.add(target);
+                element.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        });
+        dom.expandAllButton.addEventListener("click", () => {
+            dom.instanceList.querySelectorAll("details.instance-card").forEach((item) => {
+                item.open = true;
+                if (item.dataset.instanceKey) {
+                    state.openInstanceKeys.add(item.dataset.instanceKey);
+                }
+            });
+        });
+        dom.collapseAllButton.addEventListener("click", () => {
+            dom.instanceList.querySelectorAll("details.instance-card").forEach((item) => {
+                item.open = false;
+            });
+            state.openInstanceKeys = new Set();
+        });
+
+        function bootstrapFromParentMessage(taskName) {
+            // Embedded mode: the parent (run_all_viewer.html) holds the JSON
+            // for this task and will hand it over via postMessage. This lets
+            // drill-down work after the live HTTP server is gone — including
+            // when the run-all manifest is reopened from disk. We accept
+            // either window.parent (iframe drill-in) or window.opener (a
+            // standalone tab spawned via window.open).
+            window.addEventListener("message", (event) => {
+                const msg = event.data;
+                if (!msg || msg.type !== "artifact") return;
+                if (taskName && msg.task && msg.task !== taskName) return;
+                try {
+                    applyArtifact(msg.data);
+                } catch (error) {
+                    setStatus("error", error.message, "error");
+                }
+            });
+            const sender =
+                (window.parent && window.parent !== window)
+                    ? window.parent
+                    : window.opener;
+            if (sender) {
+                sender.postMessage(
+                    { type: "requestArtifact", task: taskName },
+                    "*",
+                );
+            } else {
+                setStatus(
+                    "error",
+                    "Embedded viewer requested but no parent or opener window is available.",
+                    "error",
+                );
+            }
+        }
+
+        async function bootstrap() {
+            renderAll();
+            const params = new URLSearchParams(window.location.search);
+            const artifactUrl = params.get("artifact");
+            const manifestUrl = params.get("manifest");
+            const summaryUrl = params.get("summary");
+
+            try {
+                if (artifactUrl === "postmessage") {
+                    bootstrapFromParentMessage(params.get("task") || "");
+                    return;
+                }
+                if (artifactUrl) {
+                    const data = await fetchJson(artifactUrl);
+                    const kind = applyArtifact(data, { sourceUrl: artifactUrl });
+                    if (kind === "manifest") {
+                        await refreshLiveData();
+                        stopPolling();
+                        if ((state.liveManifest?.status || "").toLowerCase() !== "completed") {
+                            state.pollingTimer = setInterval(refreshLiveData, state.pollIntervalMs);
+                        }
+                    }
+                    return;
+                }
+                if (manifestUrl) {
+                    await loadManifestFromUrl(manifestUrl);
+                    return;
+                }
+                if (summaryUrl) {
+                    await loadSummaryFromUrl(summaryUrl);
+                }
+            } catch (error) {
+                setStatus("error", error.message, "error");
+            }
+        }
+
+        bootstrap();
+    </script>
+</body>
+</html>

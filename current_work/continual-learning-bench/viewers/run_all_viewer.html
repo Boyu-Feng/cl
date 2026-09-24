@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="/">
+    <script>
+        // The base href above is needed when this page is served over HTTP
+        // (so root-relative manifest paths resolve against the repo root).
+        // When opened directly from disk via file://, that same base maps
+        // every relative URL to the filesystem root and breaks drill-in.
+        if (location.protocol === "file:") {
+            const base = document.querySelector("base");
+            if (base) base.remove();
+        }
+    </script>
+    <title>Run-All Dashboard</title>
+    <style>
+        * { box-sizing: border-box; }
+        :root {
+            --bg: #f3efe6;
+            --bg-soft: #fbf8f1;
+            --ink: #1c2923;
+            --muted: #5f6a61;
+            --line: #d8d0c0;
+            --card: rgba(255, 252, 246, 0.94);
+            --accent: #0b6b57;
+            --accent-soft: #d4efe6;
+            --accent-strong: #085343;
+            --gold: #c88a1c;
+            --rose: #9d4d3a;
+            --shadow: 0 18px 42px rgba(28, 41, 35, 0.10);
+            --radius: 14px;
+            --mono: "SFMono-Regular", "Menlo", "Consolas", monospace;
+            --sans: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top left, rgba(200, 138, 28, 0.10), transparent 32%),
+                radial-gradient(circle at top right, rgba(11, 107, 87, 0.12), transparent 28%),
+                linear-gradient(180deg, #faf6ee 0%, var(--bg) 100%);
+            color: var(--ink);
+            font-family: var(--sans);
+            line-height: 1.45;
+        }
+        .shell {
+            width: min(1500px, calc(100vw - 32px));
+            margin: 0 auto;
+            padding: 24px 0 40px;
+        }
+        .hero {
+            padding: 28px;
+            border-radius: 24px;
+            background: linear-gradient(135deg, rgba(11, 107, 87, 0.94), rgba(13, 80, 115, 0.88));
+            color: #f9fbfa;
+            box-shadow: var(--shadow);
+        }
+        .hero h1 { margin: 0 0 6px; font-size: clamp(1.6rem, 2.4vw, 2.4rem); letter-spacing: -0.02em; }
+        .hero p { margin: 0; max-width: 760px; color: rgba(249, 251, 250, 0.86); }
+        .hero-grid {
+            margin-top: 18px;
+            display: grid;
+            gap: 14px;
+            grid-template-columns: 1.4fr 1fr;
+        }
+        .panel {
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.10);
+            backdrop-filter: blur(8px);
+            padding: 14px;
+        }
+        .panel h2 {
+            margin: 0 0 10px;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(249, 251, 250, 0.78);
+        }
+        .file-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .button, label.file-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 999px;
+            padding: 6px 14px;
+            background: rgba(255, 255, 255, 0.08);
+            color: inherit;
+            font-family: var(--sans);
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .button:hover, label.file-button:hover { background: rgba(255, 255, 255, 0.16); }
+        input[type="file"] { display: none; }
+        .status-line { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 8px; font-size: 0.88rem; }
+        .status-dot { width: 10px; height: 10px; border-radius: 999px; background: #c8c8c8; display: inline-block; margin-right: 6px; vertical-align: middle; }
+        .status-dot.running { background: var(--gold); animation: pulse 1.4s ease-in-out infinite; }
+        .status-dot.completed { background: #6abf90; }
+        .status-dot.completed_with_failures { background: var(--rose); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+        .footer-note { margin: 8px 0 0; font-size: 0.78rem; color: rgba(249, 251, 250, 0.7); font-family: var(--mono); }
+
+        .card {
+            margin-top: 22px;
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 18px;
+            box-shadow: var(--shadow);
+        }
+        .card h2 { margin: 0 0 6px; font-size: 1.05rem; }
+        .card .copy { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+        .summary-grid {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+        }
+        .summary-tile {
+            border: 1px solid var(--line);
+            background: var(--bg-soft);
+            border-radius: 12px;
+            padding: 12px 14px;
+        }
+        .summary-tile .label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+        .summary-tile .value {
+            margin-top: 4px;
+            font-size: 1.4rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+        .summary-tile .sub { margin-top: 2px; font-size: 0.78rem; color: var(--muted); }
+
+        table.leaderboard {
+            margin-top: 14px;
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.92rem;
+        }
+        table.leaderboard th, table.leaderboard td {
+            padding: 9px 10px;
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+            vertical-align: middle;
+        }
+        table.leaderboard th {
+            font-weight: 600;
+            color: var(--muted);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: rgba(216, 208, 192, 0.16);
+        }
+        table.leaderboard tr.task-row { cursor: pointer; }
+        table.leaderboard tr.task-row:hover { background: rgba(11, 107, 87, 0.05); }
+        table.leaderboard tr.task-row.expanded { background: var(--accent-soft); }
+        table.leaderboard td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+        .pill {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid var(--line);
+        }
+        .pill.pending { background: #efeae0; color: var(--muted); }
+        .pill.running { background: #fbeed0; color: #8a5a14; border-color: #e9c980; }
+        .pill.ok { background: #d6efe2; color: var(--accent-strong); border-color: #a5d3bf; }
+        .pill.failed { background: #f7d8d0; color: var(--rose); border-color: #e6b6a8; }
+        .pill.blocked { background: #f7d8d0; color: var(--rose); border-color: #e6b6a8; }
+        .pill.partial { background: #fbeed0; color: #8a5a14; border-color: #e9c980; }
+        .arrow { display: inline-block; transition: transform 0.15s ease; color: var(--muted); }
+        tr.expanded .arrow { transform: rotate(90deg); }
+        .drill-row td {
+            padding: 0 !important;
+            background: var(--bg-soft);
+            border-bottom: 1px solid var(--line);
+        }
+        .drill-wrap { padding: 14px; }
+        .drill-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px 22px;
+            font-size: 0.82rem;
+            color: var(--muted);
+            margin-bottom: 10px;
+        }
+        .drill-meta a { color: var(--accent); text-decoration: none; }
+        .drill-meta a:hover { text-decoration: underline; }
+        .drill-iframe {
+            width: 100%;
+            min-height: 720px;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            background: white;
+        }
+        .empty { padding: 14px; text-align: center; color: var(--muted); font-size: 0.92rem; }
+        code, .mono { font-family: var(--mono); font-size: 0.84em; }
+
+        .progress-cell { min-width: 180px; }
+        .progress-track {
+            position: relative;
+            width: 100%;
+            height: 14px;
+            background: #ece5d4;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            position: absolute;
+            top: 0; left: 0; bottom: 0;
+            background: var(--accent);
+            transition: width 0.25s ease;
+        }
+        .progress-fill.completed { background: #6abf90; }
+        .progress-fill.failed { background: var(--rose); }
+        .progress-fill.blocked { background: var(--rose); }
+        .progress-fill.partial { background: #d6a23f; }
+        .progress-fill.pending { background: #c8c0ad; }
+        .progress-text {
+            margin-top: 4px;
+            font-size: 0.74rem;
+            color: var(--muted);
+            font-family: var(--mono);
+        }
+
+        @media (max-width: 880px) {
+            .hero-grid { grid-template-columns: 1fr; }
+            table.leaderboard th:nth-child(n+6),
+            table.leaderboard td:nth-child(n+6) { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <h1>Run-All Dashboard</h1>
+            <p>One system, all tasks. Watch each run's headline metrics live, then drill into any task to inspect its full trace.</p>
+            <div class="hero-grid">
+                <div class="panel">
+                    <h2>Aggregate Manifest</h2>
+                    <div class="file-row">
+                        <label class="file-button">
+                            Load Manifest
+                            <input id="manifestFile" type="file" accept=".json,.json.gz,application/json,application/gzip">
+                        </label>
+                        <label class="file-button" id="artifactsFileLabel" style="display:none">
+                            Load task_artifacts.json.gz
+                            <input id="artifactsFile" type="file" accept=".json,.json.gz,application/json,application/gzip">
+                        </label>
+                        <button class="button" id="reloadButton" type="button">Reload</button>
+                        <button class="button" id="clearButton" type="button">Clear</button>
+                    </div>
+                    <p class="footer-note" id="sourceHint">Pass <code>?artifact=&lt;path&gt;</code> in the URL or load a <code>results/run-all/&lt;system&gt;/&lt;run_id&gt;/manifest.json</code> manually.</p>
+                </div>
+                <div class="panel">
+                    <h2>Status</h2>
+                    <div class="status-line">
+                        <span><span id="statusDot" class="status-dot"></span><span id="statusText">Waiting for data</span></span>
+                        <span id="runMeta" class="footer-note"></span>
+                    </div>
+                    <p class="footer-note" id="pollText">Polling: off</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Suite Summary</h2>
+            <p class="copy">Means across all tasks that have completed so far.</p>
+            <div id="summaryGrid" class="summary-grid">
+                <div class="empty">No data yet.</div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Tasks</h2>
+            <p class="copy">Click a row to drill into that task's live trace viewer.</p>
+            <div style="overflow-x: auto;">
+                <table class="leaderboard">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Task</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Duration</th>
+                            <th>Cumulative Gain</th>
+                            <th>Total Reward (mean / run)</th>
+                            <th>Mean Run Cost (USD)</th>
+                            <th>Log</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboardBody">
+                        <tr><td colspan="9" class="empty">No manifest loaded.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const state = {
+            manifestUrl: null,
+            manifest: null,
+            pollTimer: null,
+            pollIntervalMs: 2000,
+            expanded: new Set(),
+            // task name -> { totalCost, meanCost, costFound, instancesDone, totalInstances }
+            liveByTask: new Map(),
+            liveFetchInflight: false,
+            wallClockTimer: null,
+            // task name -> embedded viewer_artifact object, or null. When
+            // present, drill-down iframes receive their data via postMessage
+            // instead of fetching a per-task JSON path.
+            taskArtifacts: null,
+        };
+
+        const dom = {
+            manifestFile: document.getElementById("manifestFile"),
+            artifactsFile: document.getElementById("artifactsFile"),
+            artifactsFileLabel: document.getElementById("artifactsFileLabel"),
+            reloadButton: document.getElementById("reloadButton"),
+            clearButton: document.getElementById("clearButton"),
+            sourceHint: document.getElementById("sourceHint"),
+            statusDot: document.getElementById("statusDot"),
+            statusText: document.getElementById("statusText"),
+            runMeta: document.getElementById("runMeta"),
+            pollText: document.getElementById("pollText"),
+            summaryGrid: document.getElementById("summaryGrid"),
+            leaderboardBody: document.getElementById("leaderboardBody"),
+        };
+
+        function fmtNumber(value, opts = {}) {
+            if (value === null || value === undefined || Number.isNaN(value)) return "—";
+            const { digits = 3, suffix = "" } = opts;
+            const num = Number(value);
+            if (!Number.isFinite(num)) return "—";
+            return num.toFixed(digits) + suffix;
+        }
+
+        function fmtCurrency(value) {
+            if (value === null || value === undefined || Number.isNaN(value)) return "—";
+            const num = Number(value);
+            if (!Number.isFinite(num)) return "—";
+            if (num === 0) return "$0";
+            if (Math.abs(num) < 0.01) return "$" + num.toFixed(4);
+            return "$" + num.toFixed(2);
+        }
+
+        function fmtDuration(seconds) {
+            if (seconds === null || seconds === undefined) return "—";
+            const s = Number(seconds);
+            if (!Number.isFinite(s)) return "—";
+            if (s < 60) return s.toFixed(0) + "s";
+            const m = Math.floor(s / 60);
+            const rem = Math.round(s - m * 60);
+            return `${m}m ${rem}s`;
+        }
+
+        function escapeHtml(str) {
+            return String(str ?? "").replace(/[&<>"']/g, (ch) => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+            })[ch]);
+        }
+
+        function buildArtifactQueryParam(value) {
+            return "?artifact=" + encodeURIComponent(value);
+        }
+
+        // When loaded from disk, the page sits next to single_task_viewer.html
+        // in viewers/, so a sibling-relative path resolves correctly. When
+        // served over HTTP the base href makes "/" the root, so we need to
+        // route through "viewers/".
+        const VIEWER_PREFIX = location.protocol === "file:" ? "" : "viewers/";
+
+        function buildSingleTaskUrl(suffix) {
+            return VIEWER_PREFIX + "single_task_viewer.html" + suffix;
+        }
+
+        function openInStandaloneViewer(href) {
+            // Use window.open (not <a target="_blank">) so window.opener is
+            // preserved on the child — single_task_viewer.html falls back to
+            // window.opener for postMessage handoff when there is no parent.
+            const win = window.open(href, "_blank");
+            if (!win) return;
+            try { win.opener = window; } catch (_) { /* same-origin only */ }
+        }
+
+        function updateStatus(manifest) {
+            if (!manifest) {
+                dom.statusDot.className = "status-dot";
+                dom.statusText.textContent = "Waiting for data";
+                dom.runMeta.textContent = "";
+                return;
+            }
+            dom.statusDot.className = "status-dot " + (manifest.status || "");
+            const counts = countsByStatus(manifest.tasks || []);
+            dom.statusText.textContent =
+                manifest.status === "running"
+                    ? `Running — ${counts.ok + counts.failed}/${manifest.tasks?.length || 0} done`
+                    : (manifest.status || "unknown");
+            const parts = [];
+            if (manifest.system) parts.push(`system: ${manifest.system}`);
+            if (manifest.run_group_id) parts.push(`run: ${manifest.run_group_id}`);
+            if (manifest.started_at) parts.push(`started: ${manifest.started_at.replace("T", " ").slice(0, 19)}`);
+            dom.runMeta.textContent = parts.join("  ·  ");
+        }
+
+        function countsByStatus(tasks) {
+            const out = { pending: 0, running: 0, ok: 0, failed: 0 };
+            for (const t of tasks) {
+                if (t.status in out) out[t.status]++;
+            }
+            return out;
+        }
+
+        function computeWallClockSeconds(manifest) {
+            if (!manifest?.started_at) return null;
+            const start = Date.parse(manifest.started_at);
+            if (!Number.isFinite(start)) return null;
+            const end = manifest.finished_at
+                ? Date.parse(manifest.finished_at)
+                : Date.now();
+            if (!Number.isFinite(end)) return null;
+            return Math.max(0, (end - start) / 1000);
+        }
+
+        function fmtElapsed(seconds) {
+            if (seconds === null || seconds === undefined) return "—";
+            const s = Math.max(0, Math.floor(seconds));
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            const pad = (n) => String(n).padStart(2, "0");
+            if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`;
+            return `${m}:${pad(sec)}`;
+        }
+
+        function taskArtifactTotalCost(taskName) {
+            const artifact = state.taskArtifacts?.[taskName];
+            if (!artifact) return null;
+            const traces = [];
+            if (artifact.baseline_trace) traces.push(artifact.baseline_trace);
+            for (const run of artifact.run_traces || []) {
+                if (run?.trace) traces.push(run.trace);
+            }
+            if (!traces.length && artifact.summary) {
+                if (artifact.summary.baseline) traces.push(artifact.summary.baseline);
+                traces.push(...(artifact.summary.runs || []));
+            }
+
+            let total = 0;
+            let found = false;
+            for (const trace of traces) {
+                const cost = extractTraceCost(trace);
+                if (cost !== null) {
+                    total += cost;
+                    found = true;
+                }
+            }
+            return found ? total : null;
+        }
+
+        function totalCostAcrossTasks(manifest) {
+            const tasks = manifest?.tasks || [];
+            let total = 0;
+            let found = false;
+            for (const task of tasks) {
+                const live = state.liveByTask.get(task.task);
+                if (live && live.costFound) {
+                    total += live.totalCost;
+                    found = true;
+                    continue;
+                }
+                const artifactCost = taskArtifactTotalCost(task.task);
+                if (artifactCost !== null) {
+                    total += artifactCost;
+                    found = true;
+                }
+            }
+            return found ? total : null;
+        }
+
+        function statusTileText(manifest) {
+            const tasks = manifest?.tasks || [];
+            const counts = countsByStatus(tasks);
+            const total = tasks.length;
+            const done = counts.ok + counts.failed;
+            const value = manifest?.status === "running"
+                ? `${done} / ${total}`
+                : (manifest?.status || "—");
+            const sub = manifest?.status === "running"
+                ? `${counts.running} running · ${counts.pending} pending · ${counts.failed} failed`
+                : `${counts.ok} ok · ${counts.failed} failed`;
+            return { value, sub };
+        }
+
+        function renderSummary(manifest) {
+            if (!manifest) {
+                dom.summaryGrid.innerHTML = '<div class="empty">No data yet.</div>';
+                return;
+            }
+            const status = statusTileText(manifest);
+            const tiles = [
+                {
+                    label: "Status",
+                    value: status.value,
+                    sub: status.sub,
+                },
+                {
+                    label: "Total Cost",
+                    value: fmtCurrency(totalCostAcrossTasks(manifest)),
+                    sub: "summed from live traces or loaded task artifacts",
+                },
+                {
+                    label: "Time Running",
+                    value: fmtElapsed(computeWallClockSeconds(manifest)),
+                    sub: manifest.finished_at ? "wall-clock duration" : "wall-clock since start",
+                },
+            ];
+            dom.summaryGrid.innerHTML = tiles
+                .map(
+                    (t) => `<div class="summary-tile">
+                        <div class="label">${escapeHtml(t.label)}</div>
+                        <div class="value">${escapeHtml(t.value)}</div>
+                        <div class="sub">${escapeHtml(t.sub)}</div>
+                    </div>`,
+                )
+                .join("");
+        }
+
+        function taskProgressHtml(task) {
+            const live = state.liveByTask.get(task.task);
+            let done = 0;
+            let total = 0;
+            if (live) {
+                done = live.instancesDone || 0;
+                total = live.totalInstances || 0;
+            }
+            const liveStatus = live?.liveStatus || null;
+            // Only fabricate 100% when subprocess finished AND we have no live
+            // data — otherwise trust live.instancesDone so blocked / partial
+            // rollouts aren't mis-reported as fully done.
+            if (task.status === "ok" && total === 0) {
+                done = 1;
+                total = 1;
+            }
+            const pct = total > 0 ? Math.max(0, Math.min(100, (done / total) * 100)) : 0;
+            let fillClass;
+            if (liveStatus === "all_blocked") fillClass = "blocked";
+            else if (liveStatus === "completed_with_gaps") fillClass = "partial";
+            else if (task.status === "ok") fillClass = done >= total ? "completed" : "partial";
+            else if (task.status === "failed") fillClass = "failed";
+            else if (task.status === "running") fillClass = "";
+            else fillClass = "pending";
+            const label = total > 0
+                ? `${done} / ${total} (${pct.toFixed(0)}%)`
+                : (task.status === "pending" ? "—" : "…");
+            return `
+                <div class="progress-track" title="${escapeHtml(label)}">
+                    <div class="progress-fill ${fillClass}" style="width: ${pct.toFixed(1)}%"></div>
+                </div>
+                <div class="progress-text">${escapeHtml(label)}</div>
+            `;
+        }
+
+        function taskCostValue(task) {
+            const live = state.liveByTask.get(task.task);
+            if (live && live.costFound) return live.meanCost;
+            const headlineCost = task.headline?.total_cost_usd;
+            if (typeof headlineCost === "number" && Number.isFinite(headlineCost)) return headlineCost;
+            return null;
+        }
+
+        function taskGainValue(task) {
+            const live = state.liveByTask.get(task.task);
+            if (live && live.cumulativeGain !== null && live.cumulativeGain !== undefined) {
+                return live.cumulativeGain;
+            }
+            const v = task.headline?.cumulative_gain;
+            return typeof v === "number" && Number.isFinite(v) ? v : null;
+        }
+
+        function taskRewardValue(task) {
+            const live = state.liveByTask.get(task.task);
+            if (live && live.meanReward !== null && live.meanReward !== undefined) {
+                return live.meanReward;
+            }
+            const v = task.headline?.total_reward;
+            return typeof v === "number" && Number.isFinite(v) ? v : null;
+        }
+
+        function effectiveTaskStatus(task) {
+            const live = state.liveByTask.get(task.task);
+            const liveStatus = live?.liveStatus || null;
+            if (task.status === "ok" && liveStatus === "all_blocked") return "blocked";
+            if (task.status === "ok" && liveStatus === "completed_with_gaps") return "partial";
+            return task.status;
+        }
+
+        function taskCellsHtml(task) {
+            const logHref = task.log_path ? escapeHtml(task.log_path) : "";
+            const effStatus = effectiveTaskStatus(task);
+            return `
+                <td><span class="arrow">▸</span></td>
+                <td><strong>${escapeHtml(task.task)}</strong><div class="mono" style="color: var(--muted); font-size: 0.78rem;">${escapeHtml(task.schedule || "default")}</div></td>
+                <td><span class="pill ${escapeHtml(effStatus)}">${escapeHtml(effStatus)}</span>${task.exit_code != null && task.exit_code !== 0 ? ` <span class="mono" style="color: var(--rose);">exit ${task.exit_code}</span>` : ""}</td>
+                <td class="progress-cell">${taskProgressHtml(task)}</td>
+                <td class="num">${escapeHtml(fmtDuration(task.duration_seconds))}</td>
+                <td class="num">${escapeHtml(fmtNumber(taskGainValue(task), { digits: 4 }))}</td>
+                <td class="num">${escapeHtml(fmtNumber(taskRewardValue(task), { digits: 3 }))}</td>
+                <td class="num">${escapeHtml(fmtCurrency(taskCostValue(task)))}</td>
+                <td>${logHref ? `<a href="${logHref}" target="_blank" rel="noopener">log</a>` : "—"}</td>
+            `;
+        }
+
+        function buildDrillRow(task) {
+            const livePath = task.live_manifest_path;
+            const summaryPath = task.summary_path;
+            // Prefer the rich summary once it exists (final state with embedded
+            // traces); otherwise the live manifest for in-progress tasks.
+            const target = summaryPath || livePath;
+            const inlineArtifact = state.taskArtifacts && state.taskArtifacts[task.task];
+            let viewerHref = null;
+            if (inlineArtifact) {
+                viewerHref = buildSingleTaskUrl(
+                    "?artifact=postmessage&task=" + encodeURIComponent(task.task),
+                );
+            } else if (target) {
+                viewerHref = buildSingleTaskUrl(buildArtifactQueryParam(target));
+            }
+            const tr = document.createElement("tr");
+            tr.className = "drill-row";
+            tr.dataset.taskDrill = task.task;
+            tr.innerHTML = `
+                <td colspan="9">
+                    <div class="drill-wrap">
+                        <div class="drill-meta">
+                            ${viewerHref ? `<a href="#" data-viewer-href="${escapeHtml(viewerHref)}" class="open-viewer">Open in standalone viewer ↗</a>` : ""}
+                            ${livePath ? `<span>live manifest: <code>${escapeHtml(livePath)}</code></span>` : ""}
+                            ${summaryPath ? `<span>summary: <code>${escapeHtml(summaryPath)}</code></span>` : ""}
+                            ${task.log_path ? `<span>log: <code>${escapeHtml(task.log_path)}</code></span>` : ""}
+                        </div>
+                        ${
+                            viewerHref
+                                ? `<iframe class="drill-iframe" src="${escapeHtml(viewerHref)}" loading="lazy"></iframe>`
+                                : `<div class="empty">No live manifest for this task yet.</div>`
+                        }
+                    </div>
+                </td>
+            `;
+            const link = tr.querySelector("a.open-viewer");
+            if (link) {
+                link.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    openInStandaloneViewer(link.dataset.viewerHref);
+                });
+            }
+            return tr;
+        }
+
+        // Cache the latest task entry by name so click handlers always read fresh
+        // data without forcing a re-render of the entire leaderboard.
+        function indexTasks(tasks) {
+            state.tasksByName = new Map(tasks.map((t) => [t.task, t]));
+        }
+
+        function handleRowClick(tr) {
+            const taskName = tr.dataset.task;
+            const task = state.tasksByName?.get(taskName);
+            if (!task) return;
+            if (state.expanded.has(taskName)) {
+                state.expanded.delete(taskName);
+                tr.classList.remove("expanded");
+                const drill = dom.leaderboardBody.querySelector(
+                    `tr.drill-row[data-task-drill="${CSS.escape(taskName)}"]`,
+                );
+                if (drill) drill.remove();
+            } else {
+                state.expanded.add(taskName);
+                tr.classList.add("expanded");
+                tr.after(buildDrillRow(task));
+            }
+        }
+
+        function renderLeaderboard(manifest) {
+            const tasks = manifest?.tasks || [];
+            indexTasks(tasks);
+            if (!tasks.length) {
+                dom.leaderboardBody.innerHTML = `<tr><td colspan="9" class="empty">No tasks in manifest.</td></tr>`;
+                return;
+            }
+            const existing = new Map();
+            for (const tr of dom.leaderboardBody.querySelectorAll("tr.task-row")) {
+                existing.set(tr.dataset.task, tr);
+            }
+            const taskNames = tasks.map((t) => t.task);
+            const sameSet =
+                existing.size === taskNames.length &&
+                taskNames.every((n) => existing.has(n));
+            if (!sameSet) {
+                // First render, or task set changed — full rebuild. Iframe state
+                // resets here, but this only fires when the manifest actually
+                // changes shape (rare).
+                dom.leaderboardBody.innerHTML = "";
+                for (const task of tasks) {
+                    const tr = document.createElement("tr");
+                    tr.className =
+                        "task-row" + (state.expanded.has(task.task) ? " expanded" : "");
+                    tr.dataset.task = task.task;
+                    tr.innerHTML = taskCellsHtml(task);
+                    tr.addEventListener("click", () => handleRowClick(tr));
+                    dom.leaderboardBody.appendChild(tr);
+                    if (state.expanded.has(task.task)) {
+                        dom.leaderboardBody.appendChild(buildDrillRow(task));
+                    }
+                }
+                return;
+            }
+            // Steady-state poll: only update cell contents in place. The drill
+            // rows (and their iframes) are left untouched, so the inner viewer
+            // keeps its own scroll/poll state.
+            for (const task of tasks) {
+                const tr = existing.get(task.task);
+                if (!tr) continue;
+                tr.innerHTML = taskCellsHtml(task);
+                if (state.expanded.has(task.task)) tr.classList.add("expanded");
+                else tr.classList.remove("expanded");
+            }
+        }
+
+        function renderAll(manifest) {
+            updateStatus(manifest);
+            renderSummary(manifest);
+            renderLeaderboard(manifest);
+        }
+
+        function isGzipBytes(bytes) {
+            return bytes && bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+        }
+
+        async function decompressGzipBytes(bytes) {
+            if (typeof DecompressionStream === "undefined") {
+                throw new Error("This browser cannot read .json.gz artifacts (DecompressionStream unavailable).");
+            }
+            const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+            return new Uint8Array(await new Response(stream).arrayBuffer());
+        }
+
+        async function parseJsonBytes(bytes) {
+            const payloadBytes = isGzipBytes(bytes) ? await decompressGzipBytes(bytes) : bytes;
+            return JSON.parse(new TextDecoder().decode(payloadBytes));
+        }
+
+        async function readJsonFile(file) {
+            return parseJsonBytes(new Uint8Array(await file.arrayBuffer()));
+        }
+
+        async function decompressTaskArtifacts(gz_b64) {
+            const binary = atob(gz_b64);
+            const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+            return parseJsonBytes(bytes);
+        }
+
+        async function fetchJson(url) {
+            const resp = await fetch(url, { cache: "no-store" });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return parseJsonBytes(new Uint8Array(await resp.arrayBuffer()));
+        }
+
+        async function fetchManifest(url) {
+            return fetchJson(url);
+        }
+
+        async function fetchJsonOrNull(url) {
+            try {
+                return await fetchJson(url);
+            } catch {
+                return null;
+            }
+        }
+
+        async function hydrateTaskArtifacts(manifest) {
+            if (manifest.task_artifacts) {
+                state.taskArtifacts = manifest.task_artifacts;
+                return;
+            }
+            if (manifest.task_artifacts_gz_b64 && !state.taskArtifacts) {
+                state.taskArtifacts = await decompressTaskArtifacts(manifest.task_artifacts_gz_b64);
+                return;
+            }
+            if (manifest.task_artifacts_path && !state.taskArtifacts) {
+                state.taskArtifacts = await fetchJsonOrNull(manifest.task_artifacts_path);
+            }
+        }
+
+        function pickExpectedPerPhase(liveManifest) {
+            const params = liveManifest?.task?.params || {};
+            const keys = [
+                "expected_num_instances",
+                "expected_sequence_length",
+                "num_hands",
+                "num_instances",
+                "num_problems",
+                "num_issues",
+                "num_reactions",
+                "n_instances",
+            ];
+            for (const k of keys) {
+                const v = Number(params[k]);
+                if (Number.isFinite(v) && v > 0) return v;
+            }
+            return 0;
+        }
+
+        function extractTraceCost(trace) {
+            if (!trace) return null;
+            const c = trace.execution?.usage?.interaction?.cost_usd
+                ?? trace.execution?.usage?.respond?.cost_usd
+                ?? trace.aggregate?.total_cost;
+            return typeof c === "number" && Number.isFinite(c) ? c : null;
+        }
+
+        async function fetchTaskLive(taskEntry) {
+            const livePath = taskEntry.live_manifest_path;
+            if (!livePath) return null;
+            const liveManifest = await fetchJsonOrNull(livePath);
+            if (!liveManifest) return null;
+
+            const baselinePath = liveManifest.baseline?.trace_path || null;
+            const runPaths = (liveManifest.runs || [])
+                .map((r) => r?.trace_path)
+                .filter(Boolean);
+
+            const [baselineTrace, ...runTraces] = await Promise.all([
+                baselinePath ? fetchJsonOrNull(baselinePath) : Promise.resolve(null),
+                ...runPaths.map(fetchJsonOrNull),
+            ]);
+
+            let totalCost = 0;
+            let costFound = false;
+            const runCosts = [];
+            let instancesDone = 0;
+
+            if (baselineTrace) {
+                const cost = extractTraceCost(baselineTrace);
+                if (cost !== null) {
+                    totalCost += cost;
+                    costFound = true;
+                }
+                if (Array.isArray(baselineTrace.instance_outcomes)) {
+                    instancesDone += baselineTrace.instance_outcomes.length;
+                }
+            }
+            for (const trace of runTraces) {
+                if (!trace) continue;
+                const cost = extractTraceCost(trace);
+                if (cost !== null) {
+                    totalCost += cost;
+                    runCosts.push(cost);
+                    costFound = true;
+                }
+                if (Array.isArray(trace.instance_outcomes)) {
+                    instancesDone += trace.instance_outcomes.length;
+                }
+            }
+            const meanCost = runCosts.length
+                ? runCosts.reduce((a, b) => a + b, 0) / runCosts.length
+                : null;
+
+            // Per-run total reward (mean across runs).
+            const runTotalRewards = [];
+            for (const trace of runTraces) {
+                if (!trace || !Array.isArray(trace.instance_outcomes)) continue;
+                let sum = 0;
+                let any = false;
+                for (const o of trace.instance_outcomes) {
+                    const r = Number(o?.reward);
+                    if (Number.isFinite(r)) { sum += r; any = true; }
+                }
+                if (any) runTotalRewards.push(sum);
+            }
+            const meanReward = runTotalRewards.length
+                ? runTotalRewards.reduce((a, b) => a + b, 0) / runTotalRewards.length
+                : null;
+
+            // Cumulative gain: align runs vs baseline by instance_index, then
+            // sum the per-index mean gains across runs.
+            let cumulativeGain = null;
+            if (baselineTrace?.instance_outcomes && runTraces.some((t) => t?.instance_outcomes?.length)) {
+                const baselineByIndex = new Map();
+                for (const o of baselineTrace.instance_outcomes) {
+                    if (o && o.instance_index !== undefined && o.instance_index !== null) {
+                        baselineByIndex.set(Number(o.instance_index), Number(o.reward ?? 0));
+                    }
+                }
+                const maxLength = Math.max(
+                    0,
+                    ...runTraces.map((t) => (t?.instance_outcomes || []).length),
+                );
+                const meanGainByIndex = [];
+                for (let i = 0; i < maxLength; i++) {
+                    const gains = [];
+                    for (const trace of runTraces) {
+                        const outcome = (trace?.instance_outcomes || [])[i];
+                        if (!outcome) continue;
+                        const idxKey = outcome.instance_index !== undefined && outcome.instance_index !== null
+                            ? Number(outcome.instance_index)
+                            : null;
+                        const baselineReward = idxKey !== null && baselineByIndex.has(idxKey)
+                            ? baselineByIndex.get(idxKey)
+                            : null;
+                        if (baselineReward === null) continue;
+                        const reward = Number(outcome.reward ?? 0);
+                        gains.push(reward - baselineReward);
+                    }
+                    meanGainByIndex.push(
+                        gains.length ? gains.reduce((a, b) => a + b, 0) / gains.length : null,
+                    );
+                }
+                const gainValues = meanGainByIndex.filter((value) => value !== null);
+                cumulativeGain = gainValues.length
+                    ? gainValues.reduce((total, value) => total + value, 0)
+                    : null;
+            }
+
+            const expectedPerPhase = pickExpectedPerPhase(liveManifest);
+            const numPhases = 1 + (liveManifest.runs?.length || 0);
+            const totalInstances = expectedPerPhase * numPhases;
+            return {
+                totalCost,
+                meanCost,
+                costFound,
+                instancesDone,
+                totalInstances,
+                meanReward,
+                cumulativeGain,
+                liveStatus: liveManifest.status || null,
+            };
+        }
+
+        async function refreshLiveTaskData(manifest) {
+            if (state.liveFetchInflight) return;
+            state.liveFetchInflight = true;
+            try {
+                const tasks = manifest?.tasks || [];
+                // Skip pending tasks (no live data yet) and tasks we've already
+                // captured a final headline for (cheap optimization).
+                const targets = tasks.filter((t) => t.status === "running" || t.status === "ok" || t.status === "failed");
+                const results = await Promise.all(
+                    targets.map((t) => fetchTaskLive(t).then((data) => [t.task, data]))
+                );
+                let changed = false;
+                for (const [name, data] of results) {
+                    if (!data) continue;
+                    state.liveByTask.set(name, data);
+                    changed = true;
+                }
+                if (changed) renderAll(state.manifest);
+            } finally {
+                state.liveFetchInflight = false;
+            }
+        }
+
+        async function pollOnce() {
+            if (!state.manifestUrl) return;
+            try {
+                const manifest = await fetchManifest(state.manifestUrl);
+                if (manifest && manifest.kind !== "run_all_manifest") {
+                    throw new Error("Not a run-all manifest");
+                }
+                state.manifest = manifest;
+                await hydrateTaskArtifacts(manifest);
+                renderAll(manifest);
+                refreshLiveTaskData(manifest);
+                if (manifest.status && manifest.status !== "running") {
+                    stopPolling("Run finished — polling stopped.");
+                }
+            } catch (err) {
+                dom.pollText.textContent = `Polling error: ${err.message}`;
+            }
+        }
+
+        function startWallClockTicker() {
+            stopWallClockTicker();
+            // Re-render the headline every second so "Time Running" advances
+            // even between manifest polls.
+            state.wallClockTimer = setInterval(() => {
+                if (state.manifest) renderSummary(state.manifest);
+            }, 1000);
+        }
+
+        function stopWallClockTicker() {
+            if (state.wallClockTimer) {
+                clearInterval(state.wallClockTimer);
+                state.wallClockTimer = null;
+            }
+        }
+
+        function startPolling() {
+            stopPolling();
+            if (!state.manifestUrl) return;
+            dom.pollText.textContent = `Polling: every ${state.pollIntervalMs / 1000}s`;
+            state.pollTimer = setInterval(pollOnce, state.pollIntervalMs);
+        }
+
+        function stopPolling(message) {
+            if (state.pollTimer) {
+                clearInterval(state.pollTimer);
+                state.pollTimer = null;
+            }
+            if (message) dom.pollText.textContent = message;
+        }
+
+        async function loadManifestFromUrl(url) {
+            state.manifestUrl = url;
+            state.liveByTask.clear();
+            dom.sourceHint.innerHTML = `Source: <code>${escapeHtml(url)}</code>`;
+            await pollOnce();
+            if (state.manifest && state.manifest.status === "running") {
+                startPolling();
+                startWallClockTicker();
+            } else {
+                stopPolling("Polling: off (run not active)");
+                stopWallClockTicker();
+            }
+        }
+
+        async function loadManifestFromFile(file) {
+            stopPolling("Polling: off (loaded from file)");
+            stopWallClockTicker();
+            state.manifestUrl = null;
+            state.liveByTask.clear();
+            dom.sourceHint.innerHTML = `Source: <code>${escapeHtml(file.name)}</code>`;
+            try {
+                const manifest = await readJsonFile(file);
+                state.manifest = manifest;
+                state.taskArtifacts = null;
+                await hydrateTaskArtifacts(manifest);
+                dom.artifactsFileLabel.style.display = state.taskArtifacts ? "none" : "inline-flex";
+                renderAll(manifest);
+                // Only attempt the path-based live refresh when the manifest
+                // didn't ship its task data inline — otherwise we'd issue
+                // doomed fetches against file:// or non-repo-root servers.
+                if (!state.taskArtifacts) {
+                    refreshLiveTaskData(manifest);
+                }
+            } catch (err) {
+                dom.sourceHint.textContent = `Failed to parse: ${err.message}`;
+            }
+        }
+
+        dom.manifestFile.addEventListener("change", (e) => {
+            const file = e.target.files?.[0];
+            if (file) loadManifestFromFile(file);
+            e.target.value = "";
+        });
+        dom.artifactsFile.addEventListener("change", async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            e.target.value = "";
+            try {
+                state.taskArtifacts = await readJsonFile(file);
+                dom.artifactsFileLabel.style.display = "none";
+                renderAll(state.manifest);
+            } catch (err) {
+                dom.sourceHint.textContent = `Failed to parse task_artifacts.json: ${err.message}`;
+            }
+        });
+        dom.reloadButton.addEventListener("click", () => {
+            if (state.manifestUrl) pollOnce();
+        });
+        dom.clearButton.addEventListener("click", () => {
+            stopPolling("Polling: off");
+            stopWallClockTicker();
+            state.manifestUrl = null;
+            state.manifest = null;
+            state.taskArtifacts = null;
+            state.expanded.clear();
+            state.liveByTask.clear();
+            dom.artifactsFileLabel.style.display = "none";
+            dom.sourceHint.innerHTML = "Pass <code>?artifact=&lt;path&gt;</code> in the URL or load a manifest manually.";
+            renderAll(null);
+            dom.leaderboardBody.innerHTML = `<tr><td colspan="9" class="empty">No manifest loaded.</td></tr>`;
+        });
+
+        // Drill-down iframes (single_task_viewer.html in postmessage mode)
+        // ask their parent for the task data they should render. Reply with
+        // the embedded artifact when we have one for that task name.
+        window.addEventListener("message", (event) => {
+            const msg = event.data;
+            if (!msg || msg.type !== "requestArtifact" || !msg.task) return;
+            if (!state.taskArtifacts) return;
+            const data = state.taskArtifacts[msg.task];
+            if (!data || !event.source) return;
+            event.source.postMessage(
+                { type: "artifact", task: msg.task, data },
+                "*",
+            );
+        });
+
+        // Auto-load from ?artifact= query param.
+        (function init() {
+            const params = new URLSearchParams(window.location.search);
+            const artifact = params.get("artifact");
+            if (artifact) loadManifestFromUrl(artifact);
+        })();
+    </script>
+</body>
+</html>

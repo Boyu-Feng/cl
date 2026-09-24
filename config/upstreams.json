@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "description": "Original vendored sources before removing nested Git metadata. Commits identify upstream bases; local modifications remain in this repository.",
+  "repositories": {
+    "ExpeL": {
+      "path": "current_work/ExpeL",
+      "url": "https://github.com/LeapLabTHU/ExpeL.git",
+      "commit": "e41ec9a24823e7b560c561ab191441b56d9bcefc",
+      "licenses": [
+        "current_work/ExpeL/LICENSE"
+      ],
+      "submodules": []
+    },
+    "GenericAgent": {
+      "path": "current_work/GenericAgent",
+      "url": "https://github.com/lsdefine/GenericAgent.git",
+      "commit": null,
+      "licenses": [
+        "current_work/GenericAgent/LICENSE"
+      ],
+      "submodules": [],
+      "source_note": "Git directory was already empty before this cleanup. URL recovered from README; original commit unknown."
+    },
+    "SEAL": {
+      "path": "current_work/SEAL",
+      "url": "https://github.com/Continual-Intelligence/SEAL.git",
+      "commit": "6d9c9f9ee392c6cc618e771f399d436d190f6ca4",
+      "licenses": [
+        "current_work/SEAL/LICENSE"
+      ],
+      "submodules": []
+    },
+    "continual-learning-bench": {
+      "path": "current_work/continual-learning-bench",
+      "url": "https://github.com/pgasawa/continual-learning-bench",
+      "commit": "5f8c50eb1e84b2eda2ef4faff757dfc812a0ea26",
+      "licenses": [
+        "current_work/continual-learning-bench/LICENSE"
+      ],
+      "submodules": []
+    },
+    "delta-Mem": {
+      "path": "current_work/delta-Mem",
+      "url": "https://github.com/declare-lab/delta-Mem.git",
+      "commit": "5cd5d9153c7f408764728d953565201e198c39e2",
+      "licenses": [],
+      "submodules": []
+    },
+    "reef": {
+      "path": "current_work/reef",
+      "url": "https://github.com/Human-Agent-Society/reef.git",
+      "commit": "fad5c927f19bf18b43aa1e05abe3e2f6c0d69127",
+      "licenses": [
+        "current_work/reef/LICENSE"
+      ],
+      "submodules": [
+        {
+          "path": "third_party/cordis",
+          "url": "https://github.com/cordiverse/cordis.git",
+          "commit": "2ceea231802cc23892b4ad10012c55c7dd4982d4",
+          "source_present": false,
+          "checkout_path": "current_work/reef/third_party/cordis"
+        },
+        {
+          "path": "third_party/reef-client",
+          "url": "https://github.com/Human-Agent-Society/reef-client.git",
+          "commit": "a008cc8320e5e4d537fed5415618e3231bf5ad36",
+          "source_present": false,
+          "checkout_path": "current_work/reef/third_party/reef-client"
+        }
+      ]
+    },
+    "reflexion": {
+      "path": "current_work/reflexion",
+      "url": "https://github.com/noahshinn/reflexion.git",
+      "commit": "218cf0ef1df84b05ce379dd4a8e47f17766733a0",
+      "licenses": [
+        "current_work/reflexion/LICENSE"
+      ],
+      "submodules": [
+        {
+          "path": "programming_runs/lazzzy",
+          "url": "https://github.com/GammaTauAI/lazzzy",
+          "commit": "404c06a5bf6201596b45d28f092aefe017306cd9",
+          "source_present": false,
+          "checkout_path": "current_work/reflexion/programming_runs/lazzzy"
+        },
+        {
+          "path": "programming_runs/executors/leetcode_env",
+          "url": "https://github.com/GammaTauAI/leetcode-hard-gym",
+          "commit": "228163abdc983712bebfd8e26f7e7d360830e648",
+          "source_present": false,
+          "checkout_path": "current_work/reflexion/programming_runs/executors/leetcode_env"
+        }
+      ]
+    }
+  }
+}

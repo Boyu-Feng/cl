@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base href="/">
+    <title>Compare Traces</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #f3efe6;
+            --bg-soft: #fbf8f1;
+            --ink: #1c2923;
+            --muted: #5f6a61;
+            --line: #d8d0c0;
+            --card: rgba(255, 252, 246, 0.92);
+            --accent: #0b6b57;
+            --accent-strong: #085343;
+            --gold: #c88a1c;
+            --rose: #9d4d3a;
+            --sky: #2b6cb0;
+            --shadow: 0 18px 42px rgba(28, 41, 35, 0.10);
+            --radius: 18px;
+            --sans: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+            --mono: "SFMono-Regular", "Menlo", "Consolas", monospace;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top left, rgba(200, 138, 28, 0.10), transparent 32%),
+                radial-gradient(circle at top right, rgba(11, 107, 87, 0.12), transparent 28%),
+                linear-gradient(180deg, #faf6ee 0%, var(--bg) 100%);
+            color: var(--ink);
+            font-family: var(--sans);
+            line-height: 1.45;
+        }
+
+        .shell {
+            width: min(1440px, calc(100vw - 32px));
+            margin: 0 auto;
+            padding: 24px 0 40px;
+        }
+
+        .hero {
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.42);
+            border-radius: 28px;
+            background:
+                linear-gradient(135deg, rgba(11, 107, 87, 0.94), rgba(13, 80, 115, 0.88)),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.0));
+            color: #f9fbfa;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -60px -80px auto;
+            width: 240px;
+            height: 240px;
+            border-radius: 999px;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.22), transparent 68%);
+        }
+
+        .hero h1 {
+            margin: 0 0 8px;
+            font-size: clamp(2rem, 3vw, 3rem);
+            letter-spacing: -0.03em;
+        }
+
+        .hero p {
+            margin: 0;
+            max-width: 820px;
+            color: rgba(249, 251, 250, 0.86);
+        }
+
+        .hero-grid {
+            margin-top: 20px;
+            display: grid;
+            gap: 16px;
+            grid-template-columns: 1.15fr 0.85fr;
+        }
+
+        .panel {
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.10);
+            backdrop-filter: blur(8px);
+            padding: 16px;
+        }
+
+        .panel h2 {
+            margin: 0 0 10px;
+            font-size: 0.92rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(249, 251, 250, 0.78);
+        }
+
+        .file-row,
+        .status-stack {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .button,
+        label.file-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 999px;
+            padding: 10px 16px;
+            font: inherit;
+            background: rgba(255, 255, 255, 0.14);
+            color: #f9fbfa;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .button:hover,
+        label.file-button:hover {
+            background: rgba(255, 255, 255, 0.22);
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            max-width: 100%;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.14);
+            font-size: 0.92rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #f8f7d2;
+        }
+
+        .status-dot.ready {
+            background: #9cf0d2;
+            box-shadow: 0 0 0 8px rgba(156, 240, 210, 0.12);
+        }
+
+        .status-dot.warn {
+            background: #ffd66e;
+            box-shadow: 0 0 0 8px rgba(255, 214, 110, 0.14);
+        }
+
+        .status-dot.error {
+            background: #ffb9a9;
+            box-shadow: 0 0 0 8px rgba(255, 185, 169, 0.12);
+        }
+
+        .footer-note {
+            margin-top: 10px;
+            color: rgba(249, 251, 250, 0.76);
+            font-size: 0.9rem;
+        }
+
+        .body-grid {
+            margin-top: 22px;
+            display: grid;
+            gap: 20px;
+        }
+
+        .card {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--card);
+            box-shadow: var(--shadow);
+            padding: 22px;
+        }
+
+        .section-head {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: space-between;
+            align-items: end;
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            margin: 0;
+            font-size: 1.15rem;
+            letter-spacing: -0.02em;
+        }
+
+        .section-copy {
+            color: var(--muted);
+            font-size: 0.94rem;
+        }
+
+        .overview-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }
+
+        .metric-card {
+            min-width: 0;
+            padding: 18px;
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 244, 235, 0.90));
+            border: 1px solid rgba(216, 208, 192, 0.75);
+        }
+
+        .metric-label {
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            font-size: 1.55rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            line-height: 1.15;
+        }
+
+        .metric-sub {
+            margin-top: 6px;
+            font-size: 0.92rem;
+            color: var(--muted);
+        }
+
+        .artifact-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .artifact-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(249, 247, 241, 0.86));
+        }
+
+        .artifact-main {
+            min-width: 0;
+            display: grid;
+            gap: 6px;
+        }
+
+        .artifact-title {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            font-weight: 700;
+        }
+
+        .artifact-meta {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .artifact-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .color-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 999px;
+            flex: 0 0 auto;
+        }
+
+        .chip {
+            display: inline-flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            max-width: 100%;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: var(--bg-soft);
+            border: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 0.82rem;
+        }
+
+        .button.secondary {
+            color: var(--ink);
+            background: #fffdf9;
+            border-color: var(--line);
+        }
+
+        .button.secondary:hover {
+            background: var(--bg-soft);
+        }
+
+        .note-box {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(249, 247, 241, 0.88));
+            padding: 16px 18px;
+        }
+
+        .note-box.warn {
+            border-color: rgba(200, 138, 28, 0.4);
+            background: linear-gradient(180deg, rgba(253, 244, 220, 0.95), rgba(255, 252, 246, 0.92));
+        }
+
+        .note-box.error {
+            border-color: rgba(192, 57, 43, 0.5);
+            background: linear-gradient(180deg, rgba(253, 227, 222, 0.95), rgba(255, 245, 244, 0.92));
+        }
+
+        .note-box h3 {
+            margin: 0 0 10px;
+            font-size: 0.95rem;
+        }
+
+        .note-box ul {
+            margin: 0;
+            padding-left: 18px;
+            color: var(--muted);
+        }
+
+        .chart-grid {
+            display: grid;
+            gap: 18px;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        }
+
+        .chart-card {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(249, 247, 241, 0.9));
+            padding: 18px;
+        }
+
+        .chart-title {
+            margin: 0 0 6px;
+            font-size: 1rem;
+        }
+
+        .chart-subtitle {
+            margin: 0 0 12px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .chart-wrap {
+            min-height: 320px;
+        }
+
+        .chart-wrap canvas {
+            width: 100%;
+            height: 320px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 12px 10px;
+            border-top: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        .status-badge,
+        .section-copy,
+        .metric-label,
+        .metric-value,
+        .metric-sub,
+        .artifact-meta,
+        .chip,
+        th,
+        td {
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        th {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        td {
+            font-size: 0.94rem;
+        }
+
+        .empty {
+            color: var(--muted);
+            border: 1px dashed var(--line);
+            border-radius: 14px;
+            padding: 18px;
+            text-align: center;
+        }
+
+        @media (max-width: 1024px) {
+            .hero-grid,
+            .chart-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .shell {
+                width: min(100vw - 20px, 100%);
+                padding-top: 16px;
+            }
+
+            .hero {
+                padding: 20px;
+                border-radius: 22px;
+            }
+
+            .card {
+                padding: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="hero">
+            <h1>Compare Benchmark Runs</h1>
+            <p>
+                Load one or more viewer artifact JSON files and compare systems at the benchmark level.
+                This page focuses on the aggregate curves and cost / gain tradeoffs, not per-instance trace details.
+            </p>
+            <div class="hero-grid">
+                <div class="panel">
+                    <h2>Artifacts</h2>
+                    <div class="file-row">
+                        <label class="file-button">
+                            Load Viewer Artifacts
+                            <input id="artifactFiles" type="file" accept=".json,.json.gz,application/json,application/gzip" multiple>
+                        </label>
+                        <button class="button" id="clearButton" type="button">Clear</button>
+                    </div>
+                    <div class="footer-note">
+                        Expected input: <code>viewer_artifact_*.json</code> or <code>viewer_artifact_*.json.gz</code> files generated by the benchmark runner.
+                        You can load more files later and they will be added to the current comparison.
+                    </div>
+                </div>
+                <div class="panel">
+                    <h2>Status</h2>
+                    <div class="status-stack">
+                        <div class="status-badge">
+                            <span id="statusDot" class="status-dot"></span>
+                            <span id="statusText">Waiting for viewer artifacts.</span>
+                        </div>
+                    </div>
+                    <div class="footer-note" id="statusHint">Load at least one viewer artifact to populate the charts.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="body-grid">
+            <section class="card">
+                <div class="section-head">
+                    <div>
+                        <h2 class="section-title">Overview</h2>
+                        <div class="section-copy">High-level comparison across the loaded benchmark runs.</div>
+                    </div>
+                </div>
+                <div id="overviewGrid" class="overview-grid"></div>
+            </section>
+
+            <section class="card">
+                <div class="section-head">
+                    <div>
+                        <h2 class="section-title">Loaded Artifacts</h2>
+                        <div class="section-copy">One row per viewer artifact. Remove rows to declutter a comparison.</div>
+                    </div>
+                </div>
+                <div id="artifactList" class="artifact-list"></div>
+            </section>
+
+            <section class="card">
+                <div class="section-head">
+                    <div>
+                        <h2 class="section-title">Comparison Notes</h2>
+                        <div class="section-copy">Simple checks to help catch apples-to-oranges comparisons.</div>
+                    </div>
+                </div>
+                <div id="notesMount"></div>
+            </section>
+
+            <section class="card">
+                <div class="section-head">
+                    <div>
+                        <h2 class="section-title">Scoreboard</h2>
+                        <div class="section-copy">Sorted summary table for the loaded systems.</div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>System</th>
+                                <th>Task</th>
+                                <th>Fixture</th>
+                                <th>Runs</th>
+                                <th>Cumulative Reward</th>
+                                <th>Cumulative Gain</th>
+                                <th>Mean Total Cost</th>
+                                <th>Avg Response</th>
+                                <th>Sequence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scoreboardBody">
+                            <tr><td colspan="9" class="empty">Load viewer artifacts to compare systems.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="section-head">
+                    <div>
+                        <h2 class="section-title">Learning Curves</h2>
+                        <div class="section-copy">Aggregate curves overlaid by system / model so trend differences are easy to inspect.</div>
+                    </div>
+                </div>
+                <div class="chart-grid">
+                    <div class="chart-card">
+                        <h3 class="chart-title">Mean Gain By Index</h3>
+                        <p class="chart-subtitle">Headline benchmark curve. Higher is better.</p>
+                        <div class="chart-wrap">
+                            <canvas id="cumulativeGainChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3 class="chart-title">Mean Reward By Index</h3>
+                        <p class="chart-subtitle">Mean run reward at each sequence index.</p>
+                        <div class="chart-wrap">
+                            <canvas id="meanRewardChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="section-head">
+                    <div>
+                        <h2 class="section-title">Cost Frontier</h2>
+                        <div class="section-copy">Pareto-style view of mean total cost per run versus final cumulative gain.</div>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <h3 class="chart-title">Cost vs. Final Cumulative Gain</h3>
+                    <p class="chart-subtitle">Each point is a loaded viewer artifact. Lower cost and higher gain is better.</p>
+                    <div class="chart-wrap">
+                        <canvas id="paretoChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="section-head">
+                    <div>
+                        <h2 class="section-title">Gain vs. Reward Frontier</h2>
+                        <div class="section-copy">Pareto-style view of cumulative reward versus final cumulative gain. Both axes are higher-is-better.</div>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <h3 class="chart-title">Cumulative Gain vs. Cumulative Reward</h3>
+                    <p class="chart-subtitle">Each point is a loaded viewer artifact. Higher reward and higher gain is better.</p>
+                    <div class="chart-wrap">
+                        <canvas id="gainVsRewardParetoChart"></canvas>
+                    </div>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+        const palette = [
+            "#0b6b57",
+            "#c88a1c",
+            "#9d4d3a",
+            "#2b6cb0",
+            "#805ad5",
+            "#d9485f",
+            "#2f855a",
+            "#b7791f",
+        ];
+
+        const state = {
+            artifacts: [],
+            nextColorIndex: 0,
+            notice: null,
+            charts: {
+                cumulativeGain: null,
+                meanReward: null,
+                pareto: null,
+                gainVsRewardPareto: null,
+            },
+            status: {
+                kind: "idle",
+                text: "Waiting for viewer artifacts.",
+                hint: "Load at least one viewer artifact to populate the charts.",
+            },
+        };
+
+        const dom = {
+            artifactFiles: document.getElementById("artifactFiles"),
+            clearButton: document.getElementById("clearButton"),
+            statusDot: document.getElementById("statusDot"),
+            statusText: document.getElementById("statusText"),
+            statusHint: document.getElementById("statusHint"),
+            overviewGrid: document.getElementById("overviewGrid"),
+            artifactList: document.getElementById("artifactList"),
+            notesMount: document.getElementById("notesMount"),
+            scoreboardBody: document.getElementById("scoreboardBody"),
+            cumulativeGainChart: document.getElementById("cumulativeGainChart"),
+            meanRewardChart: document.getElementById("meanRewardChart"),
+            paretoChart: document.getElementById("paretoChart"),
+            gainVsRewardParetoChart: document.getElementById("gainVsRewardParetoChart"),
+        };
+
+        function formatSigned(value, digits = 4) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            const number = Number(value);
+            return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
+        }
+
+        function formatNumber(value, digits = 4) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            return Number(value).toFixed(digits);
+        }
+
+        function formatCurrency(value) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            return `$${Number(value).toFixed(6)}`;
+        }
+
+        function formatDuration(value) {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) {
+                return "n/a";
+            }
+            return `${Number(value).toFixed(2)}s`;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        function isGzipBytes(bytes) {
+            return bytes && bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+        }
+
+        async function decompressGzipBytes(bytes) {
+            if (typeof DecompressionStream === "undefined") {
+                throw new Error("This browser cannot read .json.gz artifacts (DecompressionStream unavailable).");
+            }
+            const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+            return new Uint8Array(await new Response(stream).arrayBuffer());
+        }
+
+        async function parseJsonBytes(bytes) {
+            const payloadBytes = isGzipBytes(bytes) ? await decompressGzipBytes(bytes) : bytes;
+            return JSON.parse(new TextDecoder().decode(payloadBytes));
+        }
+
+        async function readJsonFile(file) {
+            return parseJsonBytes(new Uint8Array(await file.arrayBuffer()));
+        }
+
+        function normalizeSummaryShape(summary) {
+            if (!summary || !summary.run_group_id || !Array.isArray(summary.runs)) {
+                return null;
+            }
+            return summary;
+        }
+
+        function isViewerArtifactShape(data) {
+            return Boolean(data && data.kind === "viewer_artifact" && data.summary);
+        }
+
+        function lastDefined(values) {
+            return [...(values || [])]
+                .filter((value) => value !== null && value !== undefined && !Number.isNaN(Number(value)))
+                .map(Number)
+                .at(-1) ?? null;
+        }
+
+        function mean(values) {
+            const valid = (values || [])
+                .filter((value) => value !== null && value !== undefined && !Number.isNaN(Number(value)))
+                .map(Number);
+            if (!valid.length) {
+                return null;
+            }
+            return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+        }
+
+        function sum(values) {
+            const valid = (values || [])
+                .filter((value) => value !== null && value !== undefined && !Number.isNaN(Number(value)))
+                .map(Number);
+            if (!valid.length) {
+                return null;
+            }
+            return valid.reduce((total, value) => total + value, 0);
+        }
+
+        function buildMeanGainSeries(aggregate) {
+            return (aggregate?.mean_gain_by_index || [])
+                .map((value) => value === null || value === undefined || Number.isNaN(Number(value)) ? null : Number(value));
+        }
+
+        function buildSystemLabel(system) {
+            const name = system?.name || "unknown system";
+            const params = system?.params || {};
+
+            if (params.model) {
+                return `${name} · ${params.model}`;
+            }
+
+            if (params.generator_model || params.reflector_model || params.curator_model) {
+                const generator = params.generator_model || null;
+                const reflector = params.reflector_model || null;
+                const curator = params.curator_model || null;
+                const unique = [...new Set([generator, reflector, curator].filter(Boolean))];
+                if (unique.length === 1) {
+                    return `${name} · ${unique[0]}`;
+                }
+                const parts = [];
+                if (generator) {
+                    parts.push(`gen ${generator}`);
+                }
+                if (reflector) {
+                    parts.push(`refl ${reflector}`);
+                }
+                if (curator) {
+                    parts.push(`cur ${curator}`);
+                }
+                return `${name} · ${parts.join(" / ")}`;
+            }
+
+            return name;
+        }
+
+        function buildArtifactKey(summary, file) {
+            return `${summary.run_group_id || file.name}::${summary.system?.name || "system"}::${file.name}`;
+        }
+
+        function computeMeanTotalCost(summary, data) {
+            const traceByRun = new Map(
+                (data.run_traces || [])
+                    .filter((entry) => entry && entry.run_index !== undefined && entry.run_index !== null)
+                    .map((entry) => [Number(entry.run_index), entry.trace || null])
+            );
+            const perRunCosts = (summary.runs || [])
+                .map((run) => (
+                    run.execution?.usage?.interaction?.cost_usd
+                    ?? traceByRun.get(run.run_index)?.execution?.usage?.interaction?.cost_usd
+                    ?? null
+                ));
+            const costMean = mean(perRunCosts);
+            if (costMean !== null) {
+                return costMean;
+            }
+            const aggregateCost = sum(summary.aggregate?.mean_cost_by_index || []);
+            return aggregateCost;
+        }
+
+        function computeMeanResponse(summary, data) {
+            const traceByRun = new Map(
+                (data.run_traces || [])
+                    .filter((entry) => entry && entry.run_index !== undefined && entry.run_index !== null)
+                    .map((entry) => [Number(entry.run_index), entry.trace || null])
+            );
+            const perRunLatencies = (summary.runs || [])
+                .map((run) => (
+                    run.execution?.avg_response_seconds
+                    ?? traceByRun.get(run.run_index)?.execution?.avg_response_seconds
+                    ?? null
+                ));
+            const responseMean = mean(perRunLatencies);
+            if (responseMean !== null) {
+                return responseMean;
+            }
+            return mean(summary.aggregate?.mean_latency_by_index || []);
+        }
+
+        function buildArtifactRecord(file, data) {
+            if (!isViewerArtifactShape(data)) {
+                throw new Error(`${file.name}: expected a viewer artifact JSON.`);
+            }
+
+            const summary = normalizeSummaryShape(data.summary);
+            if (!summary) {
+                throw new Error(`${file.name}: invalid viewer artifact summary.`);
+            }
+
+            const aggregate = summary.aggregate || {};
+            const meanGainSeries = buildMeanGainSeries(aggregate);
+            const meanRewardSeries = (aggregate.mean_reward_by_index || [])
+                .map((value) => value === null || value === undefined ? null : Number(value));
+            const finalCumulativeGain = sum(meanGainSeries);
+            const finalCumulativeReward = sum(meanRewardSeries);
+
+            return {
+                key: buildArtifactKey(summary, file),
+                color: palette[state.nextColorIndex++ % palette.length],
+                fileName: file.name,
+                summary,
+                data,
+                label: buildSystemLabel(summary.system),
+                taskName: summary.task?.name || "unknown task",
+                variant: summary.variant || summary.task?.params?.variant || "n/a",
+                schedule: summary.schedule || summary.rollout_schedule || summary.task?.params?.schedule || summary.task?.params?.rollout_schedule || null,
+                runCount: Number(summary.run_count || summary.rollouts || summary.runs?.length || 0),
+                sequenceLength: Math.max(
+                    aggregate.mean_reward_by_index?.length || 0,
+                    aggregate.cumulative_mean_gain_by_index?.length || 0,
+                    summary.sequence_signature?.length || 0,
+                    summary.baseline?.instance_outcomes?.length || 0
+                ),
+                signature: summary.sequence_signature || [],
+                meanGainSeries,
+                meanRewardSeries,
+                finalCumulativeGain,
+                finalCumulativeReward,
+                finalMeanReward: lastDefined(meanRewardSeries),
+                meanTotalCost: computeMeanTotalCost(summary, data),
+                avgResponseSeconds: computeMeanResponse(summary, data),
+            };
+        }
+
+        function upsertArtifact(record) {
+            const existingIndex = state.artifacts.findIndex((artifact) => artifact.key === record.key);
+            if (existingIndex === -1) {
+                state.artifacts.push(record);
+                return;
+            }
+            state.artifacts[existingIndex] = {
+                ...record,
+                color: state.artifacts[existingIndex].color,
+            };
+        }
+
+        function removeArtifact(key) {
+            state.artifacts = state.artifacts.filter((artifact) => artifact.key !== key);
+            renderAll();
+        }
+
+        function setStatus(kind, text, hint) {
+            state.status = { kind, text, hint };
+            dom.statusDot.className = `status-dot ${kind}`;
+            dom.statusText.textContent = text;
+            dom.statusHint.textContent = hint;
+        }
+
+        function buildComparisonNotes(artifacts) {
+            if (!artifacts.length) {
+                return [];
+            }
+
+            const notes = [];
+            const uniqueTasks = [...new Set(artifacts.map((artifact) => artifact.taskName).filter(Boolean))];
+            const uniqueFixtures = [...new Set(artifacts.map((artifact) => artifact.schedule || artifact.variant).filter((value) => value && value !== "n/a"))];
+            const uniqueLengths = [...new Set(artifacts.map((artifact) => artifact.sequenceLength).filter((value) => value > 0))];
+            const signatures = artifacts
+                .map((artifact) => artifact.signature?.length ? JSON.stringify(artifact.signature) : null)
+                .filter(Boolean);
+
+            if (uniqueTasks.length > 1) {
+                notes.push("Loaded artifacts span multiple tasks. Treat reward and gain curves as descriptive, not directly comparable.");
+            }
+            if (uniqueFixtures.length > 1) {
+                notes.push("Loaded artifacts use different task fixtures. Differences may reflect schedule setup as well as system behavior.");
+            }
+            if (uniqueLengths.length > 1) {
+                notes.push("Sequence lengths differ across artifacts. Later curve positions are not aligned one-to-one.");
+            }
+            if (signatures.length > 1 && new Set(signatures).size > 1) {
+                notes.push("Sequence signatures differ across artifacts. Instance ordering or membership changed between runs.");
+            }
+
+            return notes;
+        }
+
+        function formatFixtureLabel(artifact) {
+            if (artifact.schedule) {
+                return `schedule ${artifact.schedule}`;
+            }
+            if (artifact.variant && artifact.variant !== "n/a") {
+                return `variant ${artifact.variant}`;
+            }
+            return "custom task params";
+        }
+
+        function buildParetoFrontier(artifacts) {
+            const points = artifacts
+                .filter((artifact) => artifact.meanTotalCost !== null && artifact.finalCumulativeGain !== null)
+                .map((artifact) => ({
+                    label: artifact.label,
+                    x: Number(artifact.meanTotalCost),
+                    y: Number(artifact.finalCumulativeGain),
+                }))
+                .sort((left, right) => left.x - right.x);
+
+            const frontier = [];
+            let bestGain = -Infinity;
+            points.forEach((point) => {
+                if (point.y > bestGain) {
+                    frontier.push(point);
+                    bestGain = point.y;
+                }
+            });
+            return frontier;
+        }
+
+        function destroyChart(chart) {
+            if (chart) {
+                chart.destroy();
+            }
+        }
+
+        function renderOverview() {
+            if (!state.artifacts.length) {
+                dom.overviewGrid.innerHTML = `<div class="empty">Load viewer artifacts to compare benchmark runs.</div>`;
+                return;
+            }
+
+            const sorted = [...state.artifacts].sort((left, right) => right.finalCumulativeGain - left.finalCumulativeGain);
+            const bestGain = sorted[0] || null;
+            const lowestCost = [...state.artifacts]
+                .filter((artifact) => artifact.meanTotalCost !== null)
+                .sort((left, right) => left.meanTotalCost - right.meanTotalCost)[0] || null;
+            const frontier = buildParetoFrontier(state.artifacts);
+            const sharedTaskNames = [...new Set(state.artifacts.map((artifact) => artifact.taskName))];
+
+            const cards = [
+                {
+                    label: "Loaded Artifacts",
+                    value: String(state.artifacts.length),
+                    sub: sharedTaskNames.length === 1
+                        ? sharedTaskNames[0]
+                        : `${sharedTaskNames.length} task families`,
+                },
+                {
+                    label: "Best Final Cum Gain",
+                    value: bestGain ? formatSigned(bestGain.finalCumulativeGain) : "n/a",
+                    sub: bestGain ? bestGain.label : "n/a",
+                },
+                {
+                    label: "Lowest Mean Cost",
+                    value: lowestCost ? formatCurrency(lowestCost.meanTotalCost) : "n/a",
+                    sub: lowestCost ? lowestCost.label : "cost not available",
+                },
+                {
+                    label: "Pareto Frontier",
+                    value: String(frontier.length),
+                    sub: frontier.length ? "non-dominated systems" : "insufficient cost data",
+                },
+            ];
+
+            dom.overviewGrid.innerHTML = cards.map((card) => `
+                <div class="metric-card">
+                    <div class="metric-label">${escapeHtml(card.label)}</div>
+                    <div class="metric-value">${escapeHtml(card.value)}</div>
+                    <div class="metric-sub">${escapeHtml(card.sub)}</div>
+                </div>
+            `).join("");
+        }
+
+        function renderArtifacts() {
+            if (!state.artifacts.length) {
+                dom.artifactList.innerHTML = `<div class="empty">No viewer artifacts loaded yet.</div>`;
+                return;
+            }
+
+            dom.artifactList.innerHTML = state.artifacts.map((artifact) => `
+                <div class="artifact-row">
+                    <div class="artifact-main">
+                        <div class="artifact-title">
+                            <span class="color-dot" style="background:${artifact.color}"></span>
+                            <span>${escapeHtml(artifact.label)}</span>
+                            <span class="chip">${escapeHtml(artifact.fileName)}</span>
+                        </div>
+                        <div class="artifact-meta">
+                            ${escapeHtml(artifact.taskName)}
+                            · ${escapeHtml(formatFixtureLabel(artifact))}
+                            · ${escapeHtml(String(artifact.runCount))} runs
+                            · seq ${escapeHtml(String(artifact.sequenceLength || "n/a"))}
+                        </div>
+                    </div>
+                    <div class="artifact-actions">
+                        <span class="chip">gain ${escapeHtml(formatSigned(artifact.finalCumulativeGain))}</span>
+                        <span class="chip">cost ${escapeHtml(formatCurrency(artifact.meanTotalCost))}</span>
+                        <button class="button secondary" type="button" data-remove-key="${escapeHtml(artifact.key)}">Remove</button>
+                    </div>
+                </div>
+            `).join("");
+
+            dom.artifactList.querySelectorAll("button[data-remove-key]").forEach((button) => {
+                button.addEventListener("click", () => {
+                    removeArtifact(button.dataset.removeKey);
+                });
+            });
+        }
+
+        function renderNotes() {
+            if (!state.artifacts.length) {
+                dom.notesMount.innerHTML = `<div class="empty">Load viewer artifacts to check task compatibility and sequence alignment.</div>`;
+                return;
+            }
+
+            const notes = buildComparisonNotes(state.artifacts);
+            const loadedSchedules = [...new Set(state.artifacts.map((a) => a.schedule).filter(Boolean))];
+            const scheduleConflict = loadedSchedules.length > 1;
+
+            if (!notes.length && !scheduleConflict) {
+                const taskNames = [...new Set(state.artifacts.map((artifact) => artifact.taskName))];
+                const sequenceLengths = [...new Set(state.artifacts.map((artifact) => artifact.sequenceLength).filter((value) => value > 0))];
+                dom.notesMount.innerHTML = `
+                    <div class="note-box">
+                        <h3>Comparison looks clean</h3>
+                        <div class="section-copy">
+                            ${escapeHtml(taskNames.join(", "))}
+                            ${sequenceLengths.length === 1 ? ` · sequence length ${sequenceLengths[0]}` : ""}
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            const scheduleBlock = scheduleConflict ? `
+                <div class="note-box error">
+                    <h3>Schedule mismatch — results may not be comparable</h3>
+                    <div class="section-copy">Loaded artifacts were run on different schedules: <strong>${loadedSchedules.map(escapeHtml).join(", ")}</strong>. Reward and gain curves measure performance on different instance sets and cannot be directly compared. Remove mismatched artifacts or load artifacts from the same schedule.</div>
+                </div>
+            ` : "";
+
+            const warningBlock = notes.length ? `
+                <div class="note-box warn">
+                    <h3>Read before comparing</h3>
+                    <ul>
+                        ${notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}
+                    </ul>
+                </div>
+            ` : "";
+
+            dom.notesMount.innerHTML = scheduleBlock + warningBlock;
+        }
+
+        function buildLineDatasets(seriesKey) {
+            return state.artifacts
+                .filter((artifact) => artifact[seriesKey].length > 0)
+                .map((artifact) => ({
+                    label: artifact.label,
+                    data: artifact[seriesKey],
+                    borderColor: artifact.color,
+                    backgroundColor: artifact.color,
+                    tension: 0.18,
+                    borderWidth: 2.5,
+                    pointRadius: 1.5,
+                    pointHoverRadius: 4,
+                    spanGaps: true,
+                }));
+        }
+
+        function renderLineChart(chartKey, canvas, title, seriesKey, yLabel) {
+            destroyChart(state.charts[chartKey]);
+
+            if (!state.artifacts.length) {
+                state.charts[chartKey] = null;
+                return;
+            }
+
+            const maxLength = Math.max(0, ...state.artifacts.map((artifact) => artifact[seriesKey].length));
+            const labels = Array.from({ length: maxLength }, (_, index) => index + 1);
+            const datasets = buildLineDatasets(seriesKey);
+
+            state.charts[chartKey] = new Chart(canvas.getContext("2d"), {
+                type: "line",
+                data: {
+                    labels,
+                    datasets,
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: "nearest",
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: {
+                            position: "bottom",
+                        },
+                        title: {
+                            display: false,
+                            text: title,
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const value = context.parsed.y;
+                                    return `${context.dataset.label}: ${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: "Sequence Index",
+                            },
+                            grid: {
+                                color: "rgba(95,106,97,0.10)",
+                            },
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: yLabel,
+                            },
+                            grid: {
+                                color: "rgba(95,106,97,0.12)",
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        function renderParetoChart() {
+            destroyChart(state.charts.pareto);
+
+            const eligible = state.artifacts
+                .filter((artifact) => artifact.meanTotalCost !== null && artifact.finalCumulativeGain !== null);
+            if (!eligible.length) {
+                state.charts.pareto = null;
+                return;
+            }
+
+            const frontier = buildParetoFrontier(eligible);
+            const datasets = eligible.map((artifact) => ({
+                label: artifact.label,
+                data: [{
+                    x: Number(artifact.meanTotalCost),
+                    y: Number(artifact.finalCumulativeGain),
+                    artifactLabel: artifact.label,
+                    fileName: artifact.fileName,
+                    finalCumulativeReward: artifact.finalCumulativeReward,
+                    avgResponseSeconds: artifact.avgResponseSeconds,
+                }],
+                showLine: false,
+                pointRadius: 6,
+                pointHoverRadius: 8,
+                borderColor: artifact.color,
+                backgroundColor: artifact.color,
+            }));
+
+            if (frontier.length >= 2) {
+                datasets.push({
+                    label: "Pareto frontier",
+                    data: frontier,
+                    type: "line",
+                    showLine: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 0,
+                    borderWidth: 2,
+                    borderDash: [8, 6],
+                    borderColor: "rgba(28, 41, 35, 0.55)",
+                    backgroundColor: "rgba(28, 41, 35, 0.0)",
+                });
+            }
+
+            state.charts.pareto = new Chart(dom.paretoChart.getContext("2d"), {
+                type: "scatter",
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: "bottom",
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    if (context.dataset.label === "Pareto frontier") {
+                                        return `Frontier: cost ${formatCurrency(context.parsed.x)}, gain ${formatSigned(context.parsed.y)}`;
+                                    }
+                                    const raw = context.raw || {};
+                                    return [
+                                        `${raw.artifactLabel || context.dataset.label}`,
+                                        `cost ${formatCurrency(context.parsed.x)}`,
+                                        `cumulative gain ${formatSigned(context.parsed.y)}`,
+                                        `cumulative reward ${formatSigned(raw.finalCumulativeReward)}`,
+                                        `avg response ${formatDuration(raw.avgResponseSeconds)}`,
+                                    ];
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: "Mean Total Cost Per Run (USD)",
+                            },
+                            grid: {
+                                color: "rgba(95,106,97,0.12)",
+                            },
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: "Final Cumulative Gain",
+                            },
+                            grid: {
+                                color: "rgba(95,106,97,0.12)",
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        function buildGainVsRewardParetoFrontier(artifacts) {
+            const points = artifacts
+                .filter((artifact) => artifact.finalCumulativeReward !== null && artifact.finalCumulativeGain !== null)
+                .map((artifact) => ({
+                    label: artifact.label,
+                    x: Number(artifact.finalCumulativeReward),
+                    y: Number(artifact.finalCumulativeGain),
+                }))
+                .sort((left, right) => right.x - left.x);
+
+            const frontier = [];
+            let bestGain = -Infinity;
+            points.forEach((point) => {
+                if (point.y > bestGain) {
+                    frontier.push(point);
+                    bestGain = point.y;
+                }
+            });
+            return frontier.reverse();
+        }
+
+        function renderGainVsRewardParetoChart() {
+            destroyChart(state.charts.gainVsRewardPareto);
+
+            const eligible = state.artifacts
+                .filter((artifact) => artifact.finalCumulativeReward !== null && artifact.finalCumulativeGain !== null);
+            if (!eligible.length) {
+                state.charts.gainVsRewardPareto = null;
+                return;
+            }
+
+            const frontier = buildGainVsRewardParetoFrontier(eligible);
+            const datasets = eligible.map((artifact) => ({
+                label: artifact.label,
+                data: [{
+                    x: Number(artifact.finalCumulativeReward),
+                    y: Number(artifact.finalCumulativeGain),
+                    artifactLabel: artifact.label,
+                    fileName: artifact.fileName,
+                    meanTotalCost: artifact.meanTotalCost,
+                    avgResponseSeconds: artifact.avgResponseSeconds,
+                }],
+                showLine: false,
+                pointRadius: 6,
+                pointHoverRadius: 8,
+                borderColor: artifact.color,
+                backgroundColor: artifact.color,
+            }));
+
+            if (frontier.length >= 2) {
+                datasets.push({
+                    label: "Pareto frontier",
+                    data: frontier,
+                    type: "line",
+                    showLine: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 0,
+                    borderWidth: 2,
+                    borderDash: [8, 6],
+                    borderColor: "rgba(28, 41, 35, 0.55)",
+                    backgroundColor: "rgba(28, 41, 35, 0.0)",
+                });
+            }
+
+            state.charts.gainVsRewardPareto = new Chart(dom.gainVsRewardParetoChart.getContext("2d"), {
+                type: "scatter",
+                data: { datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: "bottom",
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    if (context.dataset.label === "Pareto frontier") {
+                                        return `Frontier: reward ${formatSigned(context.parsed.x)}, gain ${formatSigned(context.parsed.y)}`;
+                                    }
+                                    const raw = context.raw || {};
+                                    return [
+                                        `${raw.artifactLabel || context.dataset.label}`,
+                                        `cumulative reward ${formatSigned(context.parsed.x)}`,
+                                        `cumulative gain ${formatSigned(context.parsed.y)}`,
+                                        `mean total cost ${formatCurrency(raw.meanTotalCost)}`,
+                                        `avg response ${formatDuration(raw.avgResponseSeconds)}`,
+                                    ];
+                                },
+                            },
+                        },
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: "Cumulative Reward",
+                            },
+                            grid: {
+                                color: "rgba(95,106,97,0.12)",
+                            },
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: "Final Cumulative Gain",
+                            },
+                            grid: {
+                                color: "rgba(95,106,97,0.12)",
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        function renderScoreboard() {
+            if (!state.artifacts.length) {
+                dom.scoreboardBody.innerHTML = `<tr><td colspan="9" class="empty">Load viewer artifacts to compare systems.</td></tr>`;
+                return;
+            }
+
+            const rows = [...state.artifacts].sort((left, right) => {
+                const leftReward = left.finalCumulativeReward ?? -Infinity;
+                const rightReward = right.finalCumulativeReward ?? -Infinity;
+                return rightReward - leftReward;
+            });
+            dom.scoreboardBody.innerHTML = rows.map((artifact) => `
+                <tr>
+                    <td>
+                        <div class="artifact-title">
+                            <span class="color-dot" style="background:${artifact.color}"></span>
+                            <span>${escapeHtml(artifact.label)}</span>
+                        </div>
+                    </td>
+                    <td>${escapeHtml(artifact.taskName)}</td>
+                    <td>${escapeHtml(artifact.schedule || artifact.variant || "custom")}</td>
+                    <td>${escapeHtml(String(artifact.runCount))}</td>
+                    <td>${escapeHtml(formatSigned(artifact.finalCumulativeReward))}</td>
+                    <td>${escapeHtml(artifact.meanGainSeries.length ? formatSigned(artifact.finalCumulativeGain) : "n/a")}</td>
+                    <td>${escapeHtml(formatCurrency(artifact.meanTotalCost))}</td>
+                    <td>${escapeHtml(formatDuration(artifact.avgResponseSeconds))}</td>
+                    <td>${escapeHtml(String(artifact.sequenceLength || "n/a"))}</td>
+                </tr>
+            `).join("");
+        }
+
+        function renderCharts() {
+            renderLineChart(
+                "cumulativeGain",
+                dom.cumulativeGainChart,
+                "Mean Gain By Index",
+                "meanGainSeries",
+                "Mean Gain"
+            );
+            renderLineChart(
+                "meanReward",
+                dom.meanRewardChart,
+                "Mean Reward By Index",
+                "meanRewardSeries",
+                "Mean Reward"
+            );
+            renderParetoChart();
+            renderGainVsRewardParetoChart();
+        }
+
+        function renderAll() {
+            if (state.notice) {
+                setStatus(state.notice.kind, state.notice.text, state.notice.hint);
+            } else if (!state.artifacts.length) {
+                setStatus("idle", "Waiting for viewer artifacts.", "Load at least one viewer artifact to populate the charts.");
+            } else if (state.artifacts.length === 1) {
+                setStatus("warn", "One viewer artifact loaded.", "Load at least one more artifact to make a system-vs-system comparison.");
+            } else {
+                setStatus("ready", `${state.artifacts.length} viewer artifacts loaded.`, "Charts and table update as you add or remove artifacts.");
+            }
+
+            renderOverview();
+            renderArtifacts();
+            renderNotes();
+            renderCharts();
+            renderScoreboard();
+        }
+
+        async function loadArtifacts(files) {
+            const parsed = await Promise.allSettled(
+                [...files].map(async (file) => buildArtifactRecord(file, await readJsonFile(file)))
+            );
+
+            const loaded = [];
+            const errors = [];
+            parsed.forEach((result) => {
+                if (result.status === "fulfilled") {
+                    upsertArtifact(result.value);
+                    loaded.push(result.value.fileName);
+                } else {
+                    errors.push(result.reason?.message || "Unknown file load error.");
+                }
+            });
+
+            if (errors.length && !loaded.length) {
+                state.notice = {
+                    kind: "error",
+                    text: "No viewer artifacts were loaded.",
+                    hint: errors[0],
+                };
+            } else if (errors.length) {
+                state.notice = {
+                    kind: "warn",
+                    text: `${loaded.length} artifact(s) loaded, ${errors.length} skipped.`,
+                    hint: errors[0],
+                };
+            } else {
+                state.notice = null;
+            }
+
+            renderAll();
+        }
+
+        function clearAll() {
+            state.artifacts = [];
+            state.nextColorIndex = 0;
+            state.notice = null;
+            destroyChart(state.charts.cumulativeGain);
+            destroyChart(state.charts.meanReward);
+            destroyChart(state.charts.pareto);
+            destroyChart(state.charts.gainVsRewardPareto);
+            state.charts = {
+                cumulativeGain: null,
+                meanReward: null,
+                pareto: null,
+                gainVsRewardPareto: null,
+            };
+            dom.artifactFiles.value = "";
+            renderAll();
+        }
+
+        dom.artifactFiles.addEventListener("change", async (event) => {
+            const files = event.target.files;
+            if (!files || !files.length) {
+                return;
+            }
+            await loadArtifacts(files);
+            dom.artifactFiles.value = "";
+        });
+
+        dom.clearButton.addEventListener("click", clearAll);
+
+        renderAll();
+    </script>
+</body>
+</html>
