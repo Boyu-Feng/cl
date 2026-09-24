@@ -150,6 +150,31 @@ python -m ttcl.experience_lab.run status
 
 模型和数据仍在 Git ignore 覆盖的资产目录中，探索代码及本说明可以 clone。
 
+### 2.6 PPO-8：文本经验提取器与参数经验使用器协作
+
+独立代码 `ttcl/experience_coop/`，首轮目录 `results/experience_coop/20260924_ppo8`。保持旧算法、运行和权重不变。该实验检验增加经验候选，以及训练执行模型使用经验是否能改善 ALFWorld 和真实 CLBench；尚无效果结论。
+
+- **两个角色**：writer 从旧 Delta 初始化，保留全部 36 层注意力 `q/k/v/o_proj` 的 rank-8 LoRA。reader 使用独立 rank-8、alpha-16 LoRA，挂在第 18–35 层（零起始）的注意力 `q/k/v/o_proj` 和 MLP `gate/up/down_proj`；B 矩阵零初始化，初始执行策略等于底座。后半层配置是待验证的架构假设，不声称最优。底座和词嵌入、输出头冻结；两个角色分别启用自己的 adapter，不直接合并 writer 和 reader 权重。
+- **数据**：继承 2.5 的完整训练／开发／测试角色划分及场景哈希审计。160 段训练历史来自 96 段 ALFWorld 和四个 CLBench 领域各 16 段。ALF 共用 384 个互不重复的训练场景；CLBench 历史含同题不同种子，数据库／队列各仅两个训练题，不能把重复执行称为新增独立题。先由原 Delta 和底座执行器生成共享历史、重新绑定公开输入；不读取旧实验结果来选题，不复用人工或旧自动标签。与 2.5 共用开发集，因此不声称这是研究者未见过的开发集。
+- **PPO rollout=8**：每段相同公开历史从当前 writer 独立采样 8 次，温度 1、top-p 1；每个候选在 1–2 个不同的后续训练任务、2 个执行种子上，与保留旧经验及无经验配对。保留重复候选和无效输出的记录，不按分数只选赢家。无效经验回退旧文本，并单独施加 0.1 的格式／预算惩罚。完整预算为每训练分支 1,280 次 writer 采样、5,760 条逻辑探测记录；两个分支加 320 条共享来源执行，最多 11,840 条逻辑环境记录，重复请求明确记录物理复用。
+- **两个训练分支**：`writer_only` 仅训练 writer，执行器固定为底座；`dual` 每批固定两个策略收集数据，分别更新 writer 和 reader，下一批重新加载两者。每分支 16 批，每批 6 个 ALF 家族及 4 个 CL 领域各一段历史。writer 的奖励为 `mean(R新−R旧) − 0.5 mean(max(0,R旧−R新))`；reader 的奖励为同一个 reader 的 `R有文本−R无文本`。训练前仅用共享训练来源 reward 的 RMS 冻结各领域尺度，下限 1，不用开发／测试分数定标；优势裁剪至 ±3，官方 reward 原样保存。无效 writer 的 0.1 惩罚另计。
+- **优化与归因**：沿用无独立 critic 的 PPO 式 token 裁剪目标，不称为完整 actor-critic PPO。学习率 5e-6，2 个 PPO epochs，clip 0.2，KL 系数 0.01；writer 参考策略固定为原 Delta，reader 固定参考底座。所有采样 token ID 和旧概率来自实际生成服务，优化前逐样本核对。只优化当前角色 LoRA，保留 optimizer 状态；对所有底座字节及另一个角色文件做前后哈希检查。writer minibatch 16，在无排除时每分支 160 次更新。reader 每条候选探测轨迹均匀抽取最多两次生成，按整段 reward 赋值；这是稀疏终局信用分配，不能解释为精确动作因果贡献。reader minibatch 32。每个领域等权；全部生成仍计入任务预算和成本。
+- **长度及失败**：训练上下文上限 24,576 token，writer 输出 512；reader 单次输出超过 1,024 或抽中的消息超长时明确排除，不截断、不中途换取“更好”的动作。环境执行仍保留原有预算（ALF 50 步、CL 官方工具预算及 64 轮保护上限）。缺失官方 reward 不补零；完整配对不成立时记录排除，基础设施错误停止新实验。两个角色的非零优势覆盖和排除原因必须一起报告。
+- **八组同条件评估**：无经验、未训练 writer、原 Delta、PPO-8 writer、协作 writer 配底座、旧 writer 配协作 reader、双模块协作、协作 reader 不给文本。开发集为 48 个独立 ALF 训练留出题 + 18 个 CL 题，2 种子，共 1,056 条组别记录。固定最终 checkpoint，不根据测试挑权重。writer-only 或 dual 通过“ALF 提升、两个种子不退步、四个 CL 领域均不退步且至少一个提升”的开发门槛后，再执行 134 ALF valid_unseen + 200 CL 后缀题 × 3 种子 × 8 组，共 8,016 条确认记录。否则保留开发负结果。均为每题一次的在线经验序列，与旧三次重试比较不可直接混排。组件差值和交互项是各自轨迹演化下的描述性消融，不是固定轨迹上的因果中介分析。
+- **参数经验边界**：reader 在训练期跨批积累参数经验；评估时 writer 和 reader 权重均冻结，仅经验文本继续在线更新。本轮不在测试题上更新 LoRA。
+
+```bash
+python -m ttcl.experience_coop.run prepare --gpu 3 --port 18287 \
+  --predecessor "$PWD/ttcl/results/alfworld_comparison/20260924_parserfix"
+python -m ttcl.experience_coop.run init-reader
+python -m ttcl.experience_coop.run launch
+python -m ttcl.experience_coop.run status
+python -m unittest ttcl.experience_coop.test_protocol \
+  ttcl.experience_coop.test_collection ttcl.experience_coop.test_learning
+```
+
+新服务器可省略 `--predecessor`，并设置空闲 GPU。默认复用 2.5 的冻结 split plan；如果它不存在，prepare 会在新结果目录内从官方数据建立同样规则的划分，需要先完成 4.3 的初始 Delta 训练。后台监督器须等前序实验结束且目标 GPU 连续空闲，才启动自己的服务；不会中断已有进程。代码和说明可上传 GitHub，所有模型、采样数据和运行结果仍受 ignore 保护。
+
 ## 3. 统一统计与解释约定
 
 - 以每轮明确的共同任务／种子交集计算配对差值；缺失分数不补零。
