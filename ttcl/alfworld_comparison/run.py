@@ -16,12 +16,12 @@ import time
 import traceback
 
 from ttcl.experience_evolution.core import FAMILIES, read, save, seed, digest
-from ttcl.experience_evolution.environment import Actor, make_env
+from .environment import Actor, make_env, concurrent_preflight
 from ttcl.experience_v2.common import WORKSPACE, OLD, MODEL, PYTHON, Client, environment, sha_file, start_server, stop_server
 from ttcl.reflexion_expel.upstream import Retriever
 from .report import report
 
-ROOT = WORKSPACE/'ttcl/results/alfworld_comparison/20260924'
+ROOT = WORKSPACE/'ttcl/results/alfworld_comparison/20260924_parserfix'
 ARMS = ['retry_none', 'untrained', 'delta', 'reflexion', 'expel']
 REPORT_LOCK = threading.Lock()
 
@@ -81,10 +81,19 @@ experiment. Final paired bootstrap intervals resample task IDs with seeds groupe
 Completed environment timeouts are failures. Infrastructure errors remain errors,
 stop the affected run, and are never silently converted into zero success.
 No online parameter training or best-of-N score selection is performed.
+
+Infrastructure revision: all TextWorld create/load/reset/step/close calls use a
+process-local reentrant lock because its TatSu parsers share mutable global state.
+Only CPU environment operations are serialized; model HTTP calls remain concurrent.
+Before model startup, six TRAIN tasks are checked against serial reference states
+with the production three-chain concurrency. This check cannot read test outcomes.
+When recovery_from is declared, the prior failed directory is preserved and its
+bank reused byte-for-byte after hash verification; no test condition or budget is
+changed, and no completed formal episode from a parser-corrupted run is reused.
 '''
 
 
-def prepare(root):
+def prepare(root, recovery_from=None):
     from .splits import build_manifest
     root = Path(root)
     if (root/'plan.json').exists():
@@ -112,6 +121,19 @@ def prepare(root):
             'chain_workers': 3, 'development_source': str(OLD),
             'embedding_model': str(WORKSPACE/'ttcl/models/all-mpnet-base-v2'),
             'checkpoint_selection': 'original Delta fixed final', 'actor_frozen': True}
+    if recovery_from is not None:
+        recovery_from = Path(recovery_from).resolve()
+        previous = read(recovery_from/'plan.json')
+        changed = [key for key, value in previous.items()
+                   if key not in {'created_at', 'recovery_from', 'bank_reuse'} and plan.get(key) != value]
+        if changed:
+            raise ValueError(f'Recovery changes declared experimental conditions: {changed}')
+        if read(recovery_from/'status.json')['phase'] != 'failed':
+            raise ValueError('Recovery expects a preserved failed run')
+        if list((recovery_from/'evaluation').rglob('episode.json')):
+            raise ValueError('This recovery route requires zero completed formal episodes')
+        plan['recovery_from'] = str(recovery_from)
+        plan['bank_reuse'] = True
     save(root/'plan.json', plan)
     (root/'PROTOCOL.md').write_text(PROTOCOL)
     shutil.copytree(OLD/'training/delta/adapter', root/'adapters/delta')
@@ -131,8 +153,19 @@ def prepare(root):
         output = root/'upstream'/dest
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(WORKSPACE/'current_work'/source, output)
+    if recovery_from is not None:
+        from .recovery import restore_bank
+        provenance = restore_bank(recovery_from, root/'expel_bank', root/'upstream')
+        provenance.update(reason='TextWorld shared parser concurrency failure before any formal episode completed',
+                          original_failure_status_sha256=sha_file(recovery_from/'status.json'),
+                          experimental_conditions_unchanged=True,
+                          restarted_formal_episodes_from_zero=True)
+        save(root/'recovery.json', provenance)
+        save(root/'bank_hashes.json', {str(p):sha_file(p) for p in (root/'expel_bank').rglob('*.json')})
     paths = [p for d in ['source', 'adapters', 'upstream'] for p in (root/d).rglob('*') if p.is_file()]
     paths += [root/n for n in ['plan.json', 'split_manifest.json', 'PROTOCOL.md']]
+    if recovery_from is not None:
+        paths += [root/'recovery.json']
     paths += [data/t['path'] for t in tasks]
     paths += [Path(manifest['results_root'])/item['path'] for item in manifest['historical_manifests']]
     save(root/'input_hashes.json', {str(p): sha_file(p) for p in paths})
@@ -241,6 +274,10 @@ def chain(root, sequence, bank, retriever, stop_event=None):
             check_cancelled(stop_event)
             game = task['path']
             dest = root/'evaluation'/family/str(repeat)/f'task_{position:03}'
+            save(root/'workers'/f'{family}_{repeat}.json',
+                 {'phase': 'running', 'stage': 'initializing_environment',
+                  'completed_tasks': position, 'active_game': game,
+                  'expected_tasks': len(sequence['tasks']), 'updated_at': time.time()})
             env = make_env(Path(plan['data_root'])/game)
             try:
                 query = str(env.reset()['feedback'])
@@ -256,6 +293,10 @@ def chain(root, sequence, bank, retriever, stop_event=None):
                 active = [a for a in ARMS if not episodes[a] or not episodes[a][-1]['reward']]
                 if not active:
                     break
+                save(root/'workers'/f'{family}_{repeat}.json',
+                     {'phase': 'running', 'stage': 'actor_attempt', 'attempt': attempt+1,
+                      'active_methods': active, 'completed_tasks': position, 'active_game': game,
+                      'expected_tasks': len(sequence['tasks']), 'updated_at': time.time()})
                 jobs = []
                 for arm in active:
                     check_memory(client, context[arm], plan['memory_tokens'])
@@ -320,6 +361,7 @@ def chain(root, sequence, bank, retriever, stop_event=None):
 
 def evaluate(root):
     plan = read(root/'plan.json')
+    report(root)
     bank = read(root/'expel_bank/state.json')
     retriever = Retriever(plan['embedding_model'])
     # Cache every possible embedding before sharing the retriever between workers.
@@ -423,12 +465,23 @@ def supervise(root):
     verify(root)
     plan, server = read(root/'plan.json'), None
     try:
+        save(root/'status.json', {'phase': 'environment_preflight', 'supervisor_pid': os.getpid(), 'updated_at': time.time()})
+        old_plan = read(Path(plan['development_source'])/'plan.json')
+        smoke_games = [next(seq['games'][0] for seq in old_plan['training'] if seq['family'] == family)
+                       for family in FAMILIES]
+        environment_check = concurrent_preflight(plan['data_root'], smoke_games,
+                                                workers=plan['chain_workers'], repeats=2, steps=2)
+        save(root/'environment_preflight.json', environment_check)
         save(root/'status.json', {'phase': 'starting_server', 'supervisor_pid': os.getpid(), 'updated_at': time.time()})
         server = start_server(root, plan['server_gpu'], plan['port'], {'delta': root/'adapters/delta'}, context=plan['context'])
         save(root/'status.json', {'phase': 'building_expel_bank', 'supervisor_pid': os.getpid(), 'updated_at': time.time()})
         client = Client(plan['actor_url'], context=plan['context'])
         try:
-            bank = build_bank(client, Path(plan['development_source']), root/'expel_bank', root/'upstream')
+            if plan.get('bank_reuse'):
+                from .recovery import verify_reused_bank
+                bank = verify_reused_bank(root/'expel_bank')
+            else:
+                bank = build_bank(client, Path(plan['development_source']), root/'expel_bank', root/'upstream')
         finally:
             client.session.close()
         if not (root/'bank_hashes.json').exists():
@@ -463,9 +516,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['prepare', 'launch', 'supervise', 'report', 'verify'])
     parser.add_argument('--root', type=Path, default=ROOT)
+    parser.add_argument('--recover-from', type=Path)
     args = parser.parse_args()
     if args.command == 'prepare':
-        print(json.dumps(prepare(args.root), default=str)[:800])
+        print(json.dumps(prepare(args.root, args.recover_from), default=str)[:800])
     elif args.command == 'launch':
         launch(args.root)
     elif args.command == 'supervise':

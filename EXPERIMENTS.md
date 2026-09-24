@@ -102,7 +102,7 @@ Reflexion／ExpeL 按各任务后 80% 测试集和自身无经验对照计算。
 
 ### 2.4 ALFWorld：Delta、Reflexion、ExpeL 同条件扩展评估
 
-2026-09-24 新增评估，入口 `ttcl.alfworld_comparison.run`，结果目录 `ttcl/results/alfworld_comparison/20260924`。状态以该目录的 `status.json`、`evaluation_status.json` 和 `summary.json` 为准。
+2026-09-24 新增评估，入口 `ttcl.alfworld_comparison.run`，当前恢复目录 `ttcl/results/alfworld_comparison/20260924_parserfix`。状态以该目录的 `status.json`、`evaluation_status.json` 和 `summary.json` 为准。原 `20260924` 目录保留首次运行故障：单链训练题预检通过后，正式三链并发初始化触发 TextWorld 共享 TatSu 解析器冲突，正式完整记录与回合均为 0。修复只对环境创建、重置、执行和关闭加进程内锁，模型请求仍并行；加入六类训练题的三线程环境回归。恢复时逐项断言原测试题顺序、种子、方法、模型及预算一致，原样复用通过哈希校验的 20 条 ExpeL 规则与 43 个成功示例，不重新生成经验库。原故障日志和冻结哈希不修改。
 
 使用官方 **全部 134 个 valid_unseen 任务 × 3 个采样种子**。审计覆盖旧 Delta、V2、32 历史修复和多域改进的训练、筛选、校准及训练探测清单：451 个历史任务均在 train，测试任务与其路径、完整文件 SHA256、规范化完整 PDDL 场景及目标均无交集。此前评估或保留过 114 个测试任务；另有 20 个从未用于旧评估，单列结果。这 20 个任务的类型不均衡，不单独宣称覆盖六类。
 
