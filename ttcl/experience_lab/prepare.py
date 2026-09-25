@@ -7,7 +7,7 @@ import random
 import shutil
 import time
 
-from ttcl.alfworld_comparison.splits import _inventory, _historical_usage
+from ttcl.alfworld_comparison.splits import _inventory, _historical_usage, REQUIRED_PROJECTS, _games
 from ttcl.experience_evolution.core import FAMILIES, read, save, seed
 from ttcl.experience_v2.common import WORKSPACE, MODEL, OLD, BENCH, sha_file
 
@@ -16,7 +16,40 @@ TOTALS = {'blind_spectrum_monitoring': 90, 'exploitable_poker': 120,
           'database_exploration': 20, 'cohort_studies': 20}
 
 
-def prepare(root, gpu=1, port=18277, rounds=2):
+def audit_lineage(results_root, old, inventory, fresh_lineage=False):
+    """Missing old experiments are explicit; never accept an opaque initial writer."""
+    training, evaluation, manifests, covered = _historical_usage(results_root, not fresh_lineage)
+    paths = [results_root/m['path'] for m in manifests]
+    if fresh_lineage:
+        # A copied adapter with no task provenance cannot establish isolation.
+        freeze = read(old/'freeze.json')
+        for name, key in [('plan.json', 'plan_sha256'), ('data_hashes.json', 'data_hashes_sha256')]:
+            if sha_file(old/name) != freeze[key]:
+                raise ValueError('Initial Delta frozen provenance changed: '+name)
+        status = read(old/'training/delta/status.json')
+        if status.get('phase') != 'complete' or not status.get('audit', {}).get('base_unchanged'):
+            raise ValueError('Finish and audit initial Delta training before preparing a fresh lineage')
+        games = set(_games(read(old/'plan.json')))
+        hashes = read(old/'data_hashes.json')
+        if not games or not games.issubset(hashes):
+            raise ValueError('Initial Delta task provenance is incomplete')
+        for game in games:
+            if game not in inventory or inventory[game]['sha256'] != hashes[game]:
+                raise ValueError('Initial Delta task content changed: '+game)
+        if not games.issubset(set(training) | set(evaluation)):
+            raise ValueError('Initial Delta tasks were not included in the historical exclusion audit')
+        adapter = old/'training/delta/adapter'
+        if not (adapter/'adapter_config.json').is_file() or not (adapter/'adapter_model.safetensors').is_file():
+            raise FileNotFoundError('Initial Delta adapter is missing: '+str(adapter))
+        paths += [old/n for n in ['freeze.json', 'plan.json', 'data_hashes.json', 'training/delta/status.json']]
+    audit = {'mode': 'fresh_local_lineage' if fresh_lineage else 'complete_historical_lineage',
+             'covered_projects': sorted(covered),
+             'missing_historical_projects': sorted(REQUIRED_PROJECTS-covered),
+             'scope': 'Exclude every locally recorded prior task; fresh mode does not reconstruct the old server split'}
+    return training, evaluation, manifests, audit, {str(p): sha_file(p) for p in sorted(set(paths))}
+
+
+def prepare(root, gpu=1, port=18277, rounds=2, *, fresh_lineage=False):
     root = Path(root).resolve()
     if root.exists():
         raise FileExistsError('Each exploration cycle needs a new output directory')
@@ -24,7 +57,8 @@ def prepare(root, gpu=1, port=18277, rounds=2):
         raise ValueError('This reviewed cycle permits one or two rounds')
     data = WORKSPACE/'ttcl/data/alfworld_delta'
     inventory = _inventory(data)
-    historical, historical_eval, manifests, _ = _historical_usage(WORKSPACE/'ttcl/results', True)
+    historical, historical_eval, manifests, lineage, lineage_hashes = audit_lineage(
+        WORKSPACE/'ttcl/results', OLD, inventory, fresh_lineage)
     reserved = {inventory[g]['normalized_problem_sha256'] for g in
                 set(historical) | set(historical_eval) if g in inventory}
     reserved.update(v['normalized_problem_sha256'] for v in inventory.values() if v['split'] != 'train')
@@ -136,7 +170,8 @@ def prepare(root, gpu=1, port=18277, rounds=2):
         raise AssertionError('Scene-level train/development/test collision')
     audit = {'train_games': len(set(train_games)), 'development_games': len(dev_games),
              'test_games': len(test_games), 'full_scene_hash_disjoint': True,
-             'historical_manifests': manifests, 'clbench_splits': cl_splits,
+             'historical_manifests': manifests, 'lineage': lineage,
+             'lineage_input_hashes': lineage_hashes, 'clbench_splits': cl_splits,
              'clbench_small_pools': 'Database/Cohort each have two train and two development instances; seeds do not increase unique tasks',
              'dev_excludes_historical_alf_training': True}
     save(root/'split_audit.json', audit)
@@ -144,6 +179,7 @@ def prepare(root, gpu=1, port=18277, rounds=2):
     paths += [root/'plan.json', root/'split_audit.json']
     paths += [data/g for g in sorted(set(train_games+dev_games+test_games))]
     paths += list((BENCH/'src').rglob('*.py'))
+    paths += [Path(p) for p in lineage_hashes]
     save(root/'input_hashes.json', {str(p): sha_file(p) for p in paths})
     save(root/'status.json', {'phase': 'prepared', 'rounds': rounds, 'histories_per_round': 80})
     return audit

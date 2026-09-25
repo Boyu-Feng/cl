@@ -9,6 +9,7 @@ import time
 from ttcl.experience_evolution.core import read, save
 from ttcl.experience_v2.common import WORKSPACE, sha_file
 from .collect import freeze_sources, freeze_block
+from .protocol import correction_settings
 
 
 def verify_files(hashes):
@@ -41,10 +42,7 @@ def prepare_recovery(root, origin, gpu=3, port=18287):
     plan.update(created_at=time.time(),gpu=gpu,port=port,actor_url=f'http://127.0.0.1:{port}',
         predecessor=None,initial_adapter=str(root/'adapters/original_delta'),
         initial_reader=str(root/'adapters/reader_initial'),reused_initial_rollouts=initial)
-    plan['training'].update(rollout_correction='decoupled_token_is',is_max_weight=2.,
-        reject_token_ratio=4.,max_rejected_fraction=.2,max_domain_rejected_fraction=.4,
-        correction_rule='Freeze training-backend old logps before every update; token IS=min(2,exp(old_train-old_rollout)); reject whole generated action if any token ratio outside [1/4,4]. Retain original denominators and report every rejection. No reward-based filtering.',
-        original_mae_threshold='0.15 retained as a diagnostic. Strict old mode remains unchanged; corrected mode has explicit ratio and rejected-fraction guards.')
+    plan['training'].update(correction_settings('decoupled_token_is'))
     save(root/'plan.json',plan)
     shutil.copytree(origin/'adapters',root/'adapters')
     shutil.copytree(origin/'source',root/'source',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))

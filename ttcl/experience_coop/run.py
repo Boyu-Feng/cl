@@ -224,13 +224,18 @@ def main():
         'collect-history','train','evaluate-shard','status','verify'])
     p.add_argument('--root',type=Path,default=DEFAULT_ROOT)
     p.add_argument('--split-plan',type=Path,default=DEFAULT_SPLITS)
+    p.add_argument('--fresh-lineage',action='store_true',
+                   help='Audit a new local Delta lineage; do not claim the old machine split')
+    p.add_argument('--rollout-correction',choices=['strict','decoupled_token_is'],default='strict')
     p.add_argument('--gpu',type=int,default=3);p.add_argument('--port',type=int,default=18287)
     p.add_argument('--predecessor',type=Path);p.add_argument('--origin',type=Path)
     p.add_argument('--arm',choices=['writer_only','dual']);p.add_argument('--role',choices=['writer','reader'])
     p.add_argument('--block');p.add_argument('--history');p.add_argument('--shard')
     p.add_argument('--stage',choices=['development','test'])
     a=p.parse_args();root=a.root.resolve()
-    if a.command=='prepare': print(prepare(root,a.split_plan,a.gpu,a.port,a.predecessor))
+    if a.command=='prepare':
+        print(prepare(root,a.split_plan,a.gpu,a.port,a.predecessor,
+                      rollout_correction=a.rollout_correction,fresh_lineage=a.fresh_lineage))
     elif a.command=='recover':
         from .recovery import prepare_recovery
         if a.origin is None: p.error('--origin is required for recover')

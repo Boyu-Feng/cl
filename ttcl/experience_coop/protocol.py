@@ -59,3 +59,15 @@ def validate_sample(sample, expected_binding=None):
     if sample['sample_binding'] != binding({k: sample[k] for k in
             ['input_ids', 'prompt_length', 'old_logp', 'input_binding', 'model', 'seed']}):
         raise ValueError('PPO sample content binding failed')
+
+
+def correction_settings(mode='strict'):
+    """Declare the sampling/backend correction before freezing the run."""
+    if mode == 'strict':
+        return {'rollout_correction': 'strict'}
+    if mode != 'decoupled_token_is':
+        raise ValueError('Unknown rollout correction: '+mode)
+    return dict(rollout_correction='decoupled_token_is',is_max_weight=2.,
+        reject_token_ratio=4.,max_rejected_fraction=.2,max_domain_rejected_fraction=.4,
+        correction_rule='Freeze training-backend old logps before every update; token IS=min(2,exp(old_train-old_rollout)); reject whole generated action if any token ratio outside [1/4,4]. Retain original denominators and report every rejection. No reward-based filtering.',
+        original_mae_threshold='0.15 retained as a diagnostic. Strict old mode remains unchanged; corrected mode has explicit ratio and rejected-fraction guards.')

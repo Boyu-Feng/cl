@@ -10,21 +10,25 @@ import time
 from ttcl.experience_evolution.core import read, save, seed
 from ttcl.experience_lab.prepare import prepare as prepare_splits
 from ttcl.experience_v2.common import WORKSPACE, BENCH, sha_file
-from .protocol import evaluation_routes
+from .protocol import evaluation_routes, correction_settings
 
 DEFAULT_ROOT = WORKSPACE/'results/experience_coop/20260924_ppo8'
 DEFAULT_SPLITS = WORKSPACE/'results/experience_lab/20260924_r01/plan.json'
 
 
-def prepare(root, split_plan=DEFAULT_SPLITS, gpu=3, port=18287, predecessor=None):
+def prepare(root, split_plan=DEFAULT_SPLITS, gpu=3, port=18287, predecessor=None,
+            *, rollout_correction="strict", fresh_lineage=False):
+    correction = correction_settings(rollout_correction)
     root = Path(root).resolve()
     if root.exists():
         raise FileExistsError('New experiment requires a new directory')
-    root.mkdir(parents=True)
     split_plan = Path(split_plan).resolve()
+    if fresh_lineage and split_plan.exists():
+        raise ValueError('Fresh lineage requires a new split plan path; do not reuse an old split')
     if not split_plan.exists():
-        # Reproducible on a fresh server; no old experiment results are required.
-        prepare_splits(root/'split_source', gpu=gpu, port=port, rounds=2)
+        # Fresh lineage still requires a completed, auditable initial Delta run.
+        prepare_splits(root/'split_source', gpu=gpu, port=port, rounds=2,
+                       fresh_lineage=fresh_lineage)
         split_plan = root/'split_source/plan.json'
     parent = read(split_plan)
     if len(parent['rounds']) != 2:
@@ -75,10 +79,11 @@ def prepare(root, split_plan=DEFAULT_SPLITS, gpu=3, port=18287, predecessor=None
         sources='Shared original-Delta/base-actor training histories; fresh public-input bindings, no reused human targets',
         parametric_memory='Reader LoRA accumulates across training blocks. Both LoRAs frozen during evaluation; text memory updates online.',
         final_rule='One fixed final checkpoint per training arm. Run full held-out comparison only if writer-only or dual passes development gate. No test tuning.')
+    plan['training'].update(correction)
     shutil.copytree(parent['initial_adapter'], root/'adapters/original_delta')
     save(root/'plan.json', plan)
     save(root/'split_audit.json', dict(original_audit, inherited_plan_sha256=sha_file(split_plan),
-        shared_with_experience_lab=True, input_histories=len(histories),
+        shared_with_experience_lab=split_plan.parent != root/'split_source', input_histories=len(histories),
         new_supervision='Fresh automatically verified paired official rewards, not old labels'))
     save(root/'split_supplier.json', {'plan':str(split_plan), 'sha256':sha_file(split_plan)})
     target = root/'source/ttcl'; target.mkdir(parents=True)
@@ -96,6 +101,7 @@ def prepare(root, split_plan=DEFAULT_SPLITS, gpu=3, port=18287, predecessor=None
         path=Path(p)
         if str(path).startswith(str(Path(plan['data_root']))) or str(path).startswith(str(BENCH/'src')):
             paths.append(path)
+    paths += [Path(p) for p in original_audit.get('lineage_input_hashes', {})]
     paths += [p for p in Path(plan['model']).iterdir() if p.is_file() and
               (p.suffix in {'.safetensors','.json'} or p.name in {'vocab.json','merges.txt'})]
     save(root/'input_hashes.json',{str(p):sha_file(p) for p in sorted(set(paths))})

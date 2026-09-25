@@ -1,20 +1,20 @@
 # CL：经验学习实验与从零复现
 
-整理时间：2026-09-24T10:10:56.794237+00:00。本文件是本项目实验说明的统一入口。历史说明全文在末尾按原路径归档；旧报告中的“正在运行”“尚未启动”只代表当时状态，当前进度以本节与原始 JSON 为准。
+整理时间：2026-09-25；本次训练快照截至 **10:13 UTC**。本文件是本项目实验说明的统一入口。历史说明全文在末尾按原路径归档；旧报告中的“正在运行”“尚未启动”只代表当时状态，当前进度以本节与原始 JSON 为准。
 
 本 Git 仓库只包含代码、实验说明、环境版本和重跑配方，不提交模型权重、训练数据、原始轨迹、运行结果或本机凭据。历史实验结论保留在本文；clone 不会恢复旧 checkpoint 或原始分数。
 
 ## 1. 研究目标与目录
 
-主线是冻结 Qwen3-4B-Instruct-2507 执行模型，训练经验生成器根据已完成的轨迹、反馈和旧经验生成可供后续任务使用的经验。早期 Online LoRA、Delta-Mem、SEAL、RAMP 也包含直接更新参数的路线，不应和外部经验生成器混称为同一种训练。
+早期主线冻结 Qwen3-4B-Instruct-2507 执行模型，训练经验生成器根据已完成的轨迹、反馈和旧经验生成可供后续任务使用的经验。新实验另增独立 reader LoRA，研究文本经验提取与参数经验使用的协作；底座始终冻结，评估时两个 LoRA 也冻结。早期 Online LoRA、Delta-Mem、SEAL、RAMP 也包含直接更新参数的路线，不应和外部经验生成器混称为同一种训练。
 
 | 路径 | 内容 |
 |---|---|
 | `ttcl/` | 自有方法实现、启动器、分析和测试 |
-| `results/` | 本地运行输出，Git 忽略；`ttcl/results` 由准备脚本建立兼容链接 |
+| `results/` | 本地运行输出，Git 忽略；`ttcl/results` 链接到 `results/ttcl`，新探索直接使用 `results/experience_*` |
 | `data/` | 数据集、标注和下载缓存，Git 忽略 |
 | `models/` | 底座、检索模型和实验权重，Git 忽略 |
-| `current_work/` | CLBench、Delta-Mem、SEAL、GenericAgent、REEF、Reflexion、ExpeL 上游源码及模型 |
+| `current_work/` | CLBench、Delta-Mem、SEAL、GenericAgent、REEF、Reflexion、ExpeL 上游源码；模型路径为 ignored 兼容链接 |
 | `config/` / `scripts/` | 环境清单、上游版本、资产布局、下载、检查和重跑工具 |
 
 `Delta-Mem` 上游方法与本项目的 `旧 Delta writer` 是不同对象。后者位于 `ttcl/results/experience_evolution/alfworld_delta_20260922/training/delta/adapter`。
@@ -38,6 +38,12 @@
 | `reef` | REEF 原生 GEPA 的本地 CLBench 适配 | 小样本、部分任务失败；不是全部 REEF 方法或完整复现 |
 | `experience_repair` | 32 历史固定经验诊断 + 两个 SFT + 新任务评估 | 已完成；校正文本有小幅优势，但训练后未显示泛化增益 |
 | `experience_design` | 128 条多域数据 + 三种 reward + 连续更新评估 | 训练全部完成，评估状态见下一节 |
+| `alfworld_comparison` | 134 道 ALF valid_unseen × 3 种子 × 5 方法，相同重试预算 | **2010/2010 完成**；Delta 145/402，Reflexion 200/402，ExpeL 141/402（最多三次成功） |
+| `experience_lab` | 两轮真实多域偏好收集，SFT／随机 SFT／DPO | 各 **792/792 开发记录完成**；均未通过门槛，未启动最终确认 |
+| `experience_coop` 原始严格版 | PPO rollout=8，writer-only／双 LoRA | 首批 reader 更新前概率校验失败；失败保留，不算完整训练 |
+| `experience_coop` 校正版 | 同初始策略，显式 token 重要性校正 | 两个 writer 均完成第 3/16 批；reader 第 3 批更新中，**尚无开发／测试结果** |
+
+新服务器优先阅读 [第 4 节](#4-从-github-clone-后重新实验)：下载清单见 4.2，旧 Delta 初始化见 4.3，最新 PPO-8 的从零启动命令见 4.4。当前结果依次见 2.4、2.5、2.6；第 5 节为历史原文，不代表当前运行状态。
 
 ### 2.1 2026-09-23 七组反馈评估与基线
 
@@ -204,7 +210,7 @@ python -m unittest ttcl.experience_coop.test_protocol \
   ttcl.experience_coop.test_collection ttcl.experience_coop.test_learning
 ```
 
-新服务器可省略 `--predecessor`，并设置空闲 GPU。默认复用 2.5 的冻结 split plan；如果它不存在，prepare 会在新结果目录内从官方数据建立同样规则的划分，需要先完成 4.3 的初始 Delta 训练。后台监督器须等前序实验结束且目标 GPU 连续空闲，才启动自己的服务；不会中断已有进程。代码和说明可上传 GitHub，所有模型、采样数据和运行结果仍受 ignore 保护。
+上面是原机严格版启动记录。新服务器请使用 **4.4 的校正版命令**：原机默认依赖完整历史排除清单；`--fresh-lineage` 明确建立新的本地训练谱系，仍须先完成 4.3 的初始 Delta 训练及来源校验。没有旧结果时不能宣称重建了原机完全相同的任务划分。后台监督器须等前序实验结束且目标 GPU 连续空闲，才启动自己的服务；不会中断已有进程。代码和说明可上传 GitHub，所有模型、采样数据和运行结果仍受 ignore 保护。
 
 2026-09-25 运行记录与恢复：初始 PPO-8 已完成共享来源 160 段、320 次环境执行，以及两个分支首批各 80 个候选／360 条逻辑探测。两个 writer 首批各完成 10 次更新；`dual` reader 在第 176（零起始）条动作的预更新概率检查处停止，MAE 0.31449 超过原阈值 0.15，reader 尚未做参数更新、尚无开发／测试结果。旧根目录 `20260924_ppo8` 保持失败状态，原始 token、概率、标签、权重和日志全部保留。
 
@@ -212,7 +218,7 @@ python -m unittest ttcl.experience_coop.test_protocol \
 
 独立恢复版本 `results/experience_coop/20260925_ppo8_corrected` 采用三策略定义：实际采样概率、更新前训练后端概率、更新后的策略概率。固定更新前训练概率作为 PPO 裁剪的分母，另用 `min(2, exp(logp_train_old−logp_rollout))` 的 token 重要性权重校正采样分布；权重停止梯度。某动作任一 token 概率比不在 `[1/4,4]` 时拒绝整条动作，原分母保留，不因少一条动作而放大其他动作权重。总拒绝比例超过 20% 或单领域超过 40% 则停止。原 0.15 阈值继续作为诊断统计；这是明确的新校正协议，不宣称原阈值下的严格匹配。截断及拒绝引入偏差／方差权衡，记录每个样本的拒绝和各领域覆盖。参考 [verl 的 rollout correction 说明](https://github.com/verl-project/verl/blob/main/docs/algo/rollout_corr.md)。
 
-恢复仅复用逐文件校验的共享来源和**尚未更新策略时**采得的首批原始 rollout，重新复核输入绑定和奖励；不使用新轨迹套旧标签，不继承首批已更新权重，两个训练分支均从原始初始化重新优化。新训练目录、源码快照、方案及哈希独立。默认新建实验仍保留原严格模式；恢复版本需明确调用：
+恢复仅复用逐文件校验的共享来源和**尚未更新策略时**采得的首批原始 rollout，重新复核输入绑定和奖励；不使用新轨迹套旧标签，不继承首批已更新权重，两个训练分支均从原始初始化重新优化。新训练目录、源码快照、方案及哈希独立。默认新建实验仍保留原严格模式；新服务器可以在 prepare 时显式选择 `--rollout-correction decoupled_token_is`，无需先制造一次失败。以下 `recover` **只用于原机已存在且校验通过的失败运行**，不能拿它恢复 Git 中不存在的轨迹：
 
 ```bash
 python -m ttcl.experience_coop.run recover \
@@ -221,6 +227,38 @@ python -m ttcl.experience_coop.run recover \
 python -m ttcl.experience_coop.run launch \
   --root "$PWD/results/experience_coop/20260925_ppo8_corrected"
 ```
+
+#### 校正版训练快照：2026-09-25 10:13 UTC
+
+运行目录 `results/experience_coop/20260925_ppo8_corrected`。`writer_only` 与 `dual` writer 均完成前三批，各 30 次优化；dual reader 前两批各 34 次优化，第三批已记录 12/32 次优化。完整训练需要每分支 16 批；**开发与确认测试均未开始**。
+
+下表是训练采样时的 ALFWorld 官方成功率，候选列对全部 8 个候选求平均，既不是选最佳候选，也不是独立测试。每批含 6 段 ALF 历史、12 个不同 future probe、2 个种子；候选分母 192，对照各 24，候选和对照在相同任务与种子上配对。
+
+| 分支 | 批次（日志编号） | 新生成候选经验 | 保留旧经验 | 无经验 |
+|---|---|---:|---:|---:|
+| writer-only | 1（000） | 82/192 = 42.71% | 5/24 = 20.83% | 5/24 = 20.83% |
+| writer-only | 2（001） | 53/192 = 27.60% | 6/24 = 25.00% | 6/24 = 25.00% |
+| writer-only | 3（002） | 60/192 = 31.25% | 7/24 = 29.17% | 6/24 = 25.00% |
+| dual | 1（000） | 80/192 = 41.67% | 4/24 = 16.67% | 6/24 = 25.00% |
+| dual | 2（001） | 55/192 = 28.65% | 6/24 = 25.00% | 6/24 = 25.00% |
+| dual | 3（002） | 60/192 = 31.25% | 5/24 = 20.83% | 7/24 = 29.17% |
+
+“新经验”指本批刚生成的文本。第 1 批是**尚未 PPO 更新的旧 Delta**与零初始化 reader 生成／执行的，41.67% 不能归因于新训练。第 2、3 批分别使用前 1、2 批更新后的策略，但各批任务不同，不能用跨批成功率升降推断训练效果；“保留旧经验”也不是让原 Delta 在同一批重新生成文本的模型对照。当前只能说部分训练历史上经验有用，尚未证明新算法优于旧 Delta，或 reader 带来稳定额外收益。
+
+CLBench 同样正在训练。dual 第 2／3 批原始均值如下，保持各领域量纲，不混成总 reward：
+
+| 领域 | 第 2 批：候选／旧经验／无经验 | 第 3 批：候选／旧经验／无经验 |
+|---|---|---|
+| 频谱 | 0.220650 / 0.220650 / 0.220650 | 0.211150 / 0.211150 / 0.211150 |
+| 数据库 | 0.466669 / 0 / 0.333350 | 0 / 0 / 0 |
+| 扑克 | −0.218750 / 0 / −2.000000 | −6.062500 / −5.500000 / −0.625000 |
+| 队列 | −0.007613 / +0.013843 / −0.051287 | 配对缺失，整段排除 |
+
+频谱、扑克每批各 2 道 future 题 × 2 种子，数据库、队列各仅 1 道 future 题 × 2 种子。第 3 批两个分支的队列历史 `r01_h012` 均因 `missing_official_score` 排除，writer 数据各由 80 减至 72 条；缺失没有补零。ALF 的完整配对不受此排除影响。数据库收益尚不稳定，扑克存在负迁移，不能宣称 CLBench 全面改善。
+
+第 3 批两个 writer 的末次 policy loss 分别为 −0.017741、+0.025237，参考 KL 分别为 0.001076、0.001561；reader 第 3 批第 12 步 policy loss 为 −0.088924、参考 KL 0.000244。PPO 的带符号损失可以为负；不同批次、优势和领域混合下，loss 大小不等于任务能力。训练日志中的 policy loss 是诊断统计，实际优化还含 KL 与领域权重。训练 reward 缩放已启用：扑克尺度 11.154455，其余领域为 1，来自共享训练来源的 RMS；不改写原始官方分数。
+
+原始核查入口：`training/<arm>/block_*/histories/*/labels.json`（配对奖励）、`dataset_audit.json`（缺失与排除）、`<role>/training.jsonl`（loss、KL、步数）、`<role>/behavior_audit.json`（概率偏差与校正拒绝）、`status.json`（当前阶段）。这些是 ignored 的本机产物，本文记录结果摘要，Git 中不包含其原始文件。
 
 ## 3. 统一统计与解释约定
 
@@ -251,33 +289,70 @@ python -m pip install --no-deps --target ttcl/.runtime/structured_memory_deps \
 export TTCL_WORKSPACE="$PWD"
 export TTCL_PYTHON="$PWD/ttcl/.runtime/alf_delta_env/bin/python"
 export ALFWORLD_DATA="$PWD/data/ttcl/alfworld_delta"
-export PYTHONPATH="$PWD:$PWD/current_work/continual-learning-bench"
+export PYTHONPATH="$PWD:$PWD/ttcl/.runtime/structured_memory_deps:$PWD/current_work/continual-learning-bench"
 ```
 
-以上主线采用 Python 3.12。旧 CLBench 通用 CLI 和部分 Delta-Mem 原生入口使用 Python 3.13，各自依赖在 `config/environments/`，不应混装到同一环境。需要与 PyTorch/vLLM 匹配的 NVIDIA 驱动。完整版本表来自原环境，不代表目标服务器已经安装验证。若新服务器不能访问软件源/Hugging Face/GitHub，需要由可联网机器下载相应安装包和公开资源；只 clone 代码不会消除这些外部依赖。
+以上主线采用 Python 3.12。旧 CLBench 通用 CLI 和部分 Delta-Mem 原生入口使用 Python 3.13，各自依赖在 `config/environments/`，不应混装到同一环境。需要与 PyTorch/vLLM 匹配的 NVIDIA 驱动。原机使用 A100 40GB；4.3 的初始 Delta 配方同时使用两张卡（actor 与训练器分开），4.4 的 PPO-8 监督器在一张卡上轮流采样和训练。显存需求会受上下文长度、并发和后端影响，未验证更小显存配置。完整版本表来自原环境，不代表目标服务器已经安装验证。若新服务器不能访问软件源/Hugging Face/GitHub，需要由可联网机器下载相应安装包和公开资源；只 clone 代码不会消除这些外部依赖。
 
-### 4.2 下载权重与数据
+### 4.2 下载权重与数据：公开地址、用途与目录
+
+先完成 4.1 的环境安装，再从仓库根目录下载。最新 PPO-8 最小公开依赖为 Qwen 底座、ALFWorld、CLBench 公开数据及两个 SQLite 数据库：
 
 ```bash
-# 只下载公开的基础模型和任务数据，不下载任何私有历史结果
-python scripts/fetch_assets.py base alfworld locomo
-# 要跑 CLBench 或 ExpeL 时再准备
-python scripts/fetch_assets.py clbench-data embedding
+python scripts/fetch_assets.py base alfworld clbench-data clbench-db
+# 跑 ExpeL 对照时另下检索模型；最新 PPO-8 本身不需要它
+python scripts/fetch_assets.py embedding
+# 重跑旧 experience_v2 / Delta-Mem 的 LoCoMo 部分时另下
+python scripts/fetch_assets.py locomo
 ```
 
-资源来源：
+| 资源 | 官方下载来源 | 下载位置（相对仓库根目录） | 用途 |
+|---|---|---|---|
+| Qwen3-4B-Instruct-2507 | [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | `models/delta_mem/Qwen3-4B-Instruct-2507/` | 所有当前主线的共享底座；同时用于 writer 和 reader，无需各下载一份 |
+| ALFWorld TextWorld 任务 | [官方 PDDL ZIP](https://github.com/alfworld/alfworld/releases/download/0.4.2/json_2.1.3_tw-pddl.zip) | `data/ttcl/alfworld_delta/`；解压后为 `json_2.1.1/{train,valid_seen,valid_unseen}/` | 模拟环境中执行任务；原始数据含 train 3553、valid_seen 140、valid_unseen 134 个任务，训练器再按协议筛选 |
+| CLBench 公开输入 | [固定上游版本 data/](https://github.com/pgasawa/continual-learning-bench/tree/5f8c50eb1e84b2eda2ef4faff757dfc812a0ea26/data) | `data/clbench/` | 频谱、扑克、数据库、队列研究；下载器只复制 data，不覆盖本仓库适配源码 |
+| CLBench SQLite 数据库 | [continual-learning-bench/database-exploration](https://huggingface.co/datasets/continual-learning-bench/database-exploration) 的 `products.db`、`products_drifted.db` | `data/clbench/database_exploration/` | 数据库真实任务；`clbench-data` 不代替这一步，`clbench-db` 与上游 setup 使用相同下载源 |
+| ExpeL 检索编码器 | [sentence-transformers/all-mpnet-base-v2](https://huggingface.co/sentence-transformers/all-mpnet-base-v2) | `models/embedding/all-mpnet-base-v2/` | ExpeL 经验检索；Reflexion、PPO-8 不需要额外检索权重 |
+| LoCoMo | [官方 locomo10.json](https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json) | `data/delta_mem/data/locomo10.json` | 旧多域课程及 Delta-Mem 路线的可选依赖 |
 
-| 资源 | 来源 / 本地位置 |
-|---|---|
-| Qwen3-4B-Instruct-2507 | Hugging Face `Qwen/Qwen3-4B-Instruct-2507` → `models/delta_mem/Qwen3-4B-Instruct-2507` |
-| ALFWorld | 官方 0.4.2 release 的 `json_2.1.3_tw-pddl.zip` → `data/ttcl/alfworld_delta`，内部任务路径为 `json_2.1.1` |
-| LoCoMo | `snap-research/locomo` 的 `data/locomo10.json` → `data/delta_mem/data/locomo10.json` |
-| CLBench | `config/upstreams.json` 记录版本的公开 `data/`；大型数据库还需官方 `clbench setup database_exploration` |
-| ExpeL 检索模型 | Hugging Face `sentence-transformers/all-mpnet-base-v2` → `models/embedding/all-mpnet-base-v2` |
-| 历史 Delta / Absolute / SFT / RL checkpoint | 不上传、不作为公开基础模型下载；按后续顺序重新训练 |
-| 32 条修复实验监督目标 | 不上传；在新的真实轨迹上重新审核，写入 `data/annotations/experience_repair_reviewed.json` |
+ALFWorld 主线使用文本模拟环境，不需要 Unity/AI2-THOR、视觉检测器或现实机器人采样；环境软件由 `alfworld==0.4.2`、TextWorld 等依赖安装。ZIP 文件名中的 `2.1.3` 与解压目录 `json_2.1.1` 不同是官方包结构，不要手动重命名。下载器校验压缩包 CRC，并记录 URL、SHA-256；PPO-8 还冻结实际底座文件、ALFWorld 任务文件和源码哈希；CLBench 公开输入按固定上游版本恢复，数据库下载源沿用官方配置。Hugging Face 模型下载默认取该仓库当前版本，未承诺与原机模型快照逐字节一致；如需严格版本复现，应预先固定对应 revision，并保留下载记录。
 
-原始 SEAL / Delta-Mem 训练权重也不上传；其重训配方保留在相应上游源码和本文历史说明中。获取某个公开底座并不等于恢复这些已训练权重。
+`prepare_workspace.py` 建立路径兼容：`current_work/delta-Mem/model` → `models/delta_mem`，`ttcl/models` → `models/embedding`，`ttcl/data` → `data/ttcl`，`current_work/continual-learning-bench/data` → `data/clbench`，`ttcl/results` → `results/ttcl`。下载到表中的位置即可，不必改代码中的旧路径。
+
+以下资产**没有公共下载地址，也不随 Git 上传**：
+
+| 资产 | 新服务器如何获得 | 产物位置 |
+|---|---|---|
+| 原 Delta / Absolute LoRA | 按 4.3 从公开底座重新训练；PPO-8 最小路线只依赖 Delta | `results/ttcl/experience_evolution/alfworld_delta_20260922/training/{delta,absolute}/adapter/` |
+| K1/K2、修复 SFT、设计 RL | 按各自依赖顺序重新采集和训练 | `results/ttcl/experience_{v2,repair,design}/` |
+| 新 lab SFT / DPO | 按 4.4.2 采样、自动审核偏好后训练 | `results/experience_lab/<新运行名>/` |
+| PPO-8 writer / reader | 按 4.4.1 启动；reader 从零效果 LoRA 初始化，无需下载专用 reader | `results/experience_coop/<新运行名>/adapters/` 及 `training/` |
+| 32 条修复监督目标 | 阅读新采集轨迹后重新审核并绑定内容，见 4.5 | `data/annotations/experience_repair_reviewed.json` |
+| 旧轨迹、标注、优化器状态、checkpoint、私有分数 | 新服务器重新运行生成；本文只保存原机的结果摘要 | 对应 ignored 的 `data/`、`results/`；运行 checkpoint 随结果保留 |
+
+可快速核对关键文件：
+
+```bash
+python - <<'CHECK'
+from pathlib import Path
+for name in ['models/delta_mem/Qwen3-4B-Instruct-2507/config.json',
+             'models/delta_mem/Qwen3-4B-Instruct-2507/tokenizer.json',
+             'data/clbench/database_exploration/products.db',
+             'data/clbench/database_exploration/products_drifted.db']:
+    p = Path(name)
+    assert p.is_file() and p.stat().st_size > 0, name
+assert list(Path('models/delta_mem/Qwen3-4B-Instruct-2507').glob('*.safetensors'))
+for split in ['train', 'valid_seen', 'valid_unseen']:
+    paths = list((Path('data/ttcl/alfworld_delta/json_2.1.1')/split).glob('*/*/game.tw-pddl'))
+    assert paths, split
+    print(split, len(paths))
+print('Public prerequisites found; experiment prepare performs the split audit.')
+CHECK
+```
+
+若需 Hugging Face 鉴权，可由用户在新服务器的环境中设置 `HF_TOKEN`，不要把令牌写入说明、源码或 Git。只访问内网的服务器需要能访问下载源，或由可联网机器转运表中资源；Git clone 本身只带代码和说明。
+
+原始 SEAL / Delta-Mem 训练权重也不上传；其重训配方保留在相应上游源码和本文历史说明中。获取公开底座不等于恢复已训练权重。
 
 REEF 与 Reflexion 有 4 个未随上游根仓库提供的可选依赖，原始 URL 和 commit 已记录。需要对应功能时使用：
 
@@ -322,19 +397,64 @@ TASK_RUN="$PWD/ttcl/results/experience_evolution/alfworld_delta_20260922"
 python -m ttcl.experience_evolution.run calibrate --root "$TASK_RUN"
 python -m ttcl.experience_evolution.freeze
 CUDA_VISIBLE_DEVICES=1 python -m ttcl.experience_evolution.run train --root "$TASK_RUN" --arm delta
+# 以下仅完整复现初始对照时执行；只重跑 PPO-8 可在 Delta 完成后进入 4.4
 CUDA_VISIBLE_DEVICES=1 python -m ttcl.experience_evolution.run train --root "$TASK_RUN" --arm absolute
-# 五组均需执行；不要按中途结果选组或挑 checkpoint
+# 完整对照固定运行五组；不要按中途结果挑组或 checkpoint
 for arm in none untrained delta absolute delta_reset; do
   CUDA_VISIBLE_DEVICES=1 python -m ttcl.experience_evolution.run evaluate --root "$TASK_RUN" --arm "$arm"
 done
 python -m ttcl.experience_evolution.analyze --root "$TASK_RUN"
 ```
 
+**只重跑最新 PPO-8 的最小路径**：完成上面的 prepare → actor 服务 → calibrate → freeze → `train --arm delta` 即可；检查 `training/delta/status.json` 为 `complete` 且 `audit.base_unchanged=true`。这条路径不要求先训练 Absolute、K1/K2、人工修复或设计 RL，也不要求先做旧的五组评估。保留初始 Delta 的 `plan.json`、`freeze.json`、`data_hashes.json`、训练状态和 adapter，新的划分审计需要它们。此时可结束自己为初始训练启动的 actor 服务，释放 GPU，再进入 4.4。若只有一张卡，当前初始 Delta 配方尚不是单卡采样／训练轮换入口，需先调整资源调度，不能直接同时运行两个占卡进程。
+
 原 `experience_evolution.launch` 预设 GPU 0/2/3，且不负责启动 actor 服务；不要在只有两张卡的新服务器直接照搬。手动顺序入口可避免这个资源假设。后续各阶段 GPU/端口/预算记录在 prepare 生成的 plan 中，启动前应检查可用设备，冻结计划后再正式执行。
 
 第二阶段从 `python -m ttcl.experience_v2.launch prepare` 开始，随后使用该模块的 `training` 命令完成新课程和 K1/K2；具体参数以 `--help` 为准。七组反馈和 Reflexion/ExpeL 的入口分别是 `ttcl.experience_feedback`、`ttcl.reflexion_expel`；其原协议全文保留在后面的原文索引。
 
-### 4.4 新轨迹必须重新审核标注
+### 4.4 新实验：在新服务器重新生成数据并训练
+
+#### 4.4.1 PPO-8 + writer／reader：直接新建校正版
+
+前提：4.1 环境、4.2 的四项主线依赖及 4.3 已完成的新 Delta。以下用物理 GPU 0 和端口 18287；准备前检查该 GPU 和端口可用，不要外加与 `--gpu` 冲突的 `CUDA_VISIBLE_DEVICES` 映射。
+
+```bash
+COOP_RUN="$PWD/results/experience_coop/server2_ppo8_corrected_01"
+python -m ttcl.experience_coop.run prepare \
+  --root "$COOP_RUN" --split-plan "$COOP_RUN/split_source/plan.json" \
+  --fresh-lineage --rollout-correction decoupled_token_is --gpu 0 --port 18287
+python -m ttcl.experience_coop.run init-reader --root "$COOP_RUN"
+python -m ttcl.experience_coop.run verify --root "$COOP_RUN"
+python -m ttcl.experience_coop.run launch --root "$COOP_RUN"
+python -m ttcl.experience_coop.run status --root "$COOP_RUN"
+```
+
+`launch` 后台启动监督器，按共享来源采集 → writer-only 采样／优化 → dual 采样／writer 优化／reader 优化逐批运行；不需要手动启动 vLLM。查看 `logs/supervisor.log`、`status.json`、`training/<arm>/block_*/<role>/training.jsonl`。16 批结束才进入八组开发评估；只有通过已声明的门槛才运行正式确认。训练中保持冻结源码、计划、模型和已绑定标签不变；新设定另建目录，已有目录不能覆盖。
+
+`--fresh-lineage` 的含义是**使用新服务器实际重训的 Delta 和本地全部可发现历史重新划分**。它会检查 Delta 已训练完成、底座未改动、冻结计划和原始任务哈希一致，并排除历史扫描器覆盖的五个旧阶段中，本地已有清单记录的训练／评估历史和官方非 train 场景，再保证新 train／dev／test 的完整场景哈希互斥。缺少原机其他阶段的排除清单会明确写入 `split_audit.json`，所以这是新训练谱系下的同规则实验，不能宣称复现了原机完全相同的历史／任务／分数。没有训练来源的孤立 adapter 不能代替来源记录。若需要同原机完整排除清单，先重建相关阶段并省略此选项；不得删除审计检查来强行启动。
+
+`--rollout-correction decoupled_token_is` 在冻结前选择与 2.6 恢复版相同的校正公式和拒绝阈值；新采集全部历史与 rollout，不依赖失败运行或旧标签。不传时保留原 `strict` 协议。`recover` 用于有原始失败目录及逐文件校验记录的恢复，不能作为 clone 后入口。新机器、推理实现、重新训练得到的初始化以及数据谱系可能改变采样结果，应重新报告结果。
+
+#### 4.4.2 重跑两轮真实多域 SFT／DPO 探索
+
+同样先得到可审计的初始 Delta，再单独启动：
+
+```bash
+LAB_RUN="$PWD/results/experience_lab/server2_r01"
+python -m ttcl.experience_lab.run prepare --root "$LAB_RUN" \
+  --fresh-lineage --gpu 0 --port 18277 --rounds 2
+python -m ttcl.experience_lab.run verify --root "$LAB_RUN"
+python -m ttcl.experience_lab.run launch --root "$LAB_RUN"
+python -m ttcl.experience_lab.run status --root "$LAB_RUN"
+```
+
+该路线重新从环境奖励确认偏好，不需要第 4.5 的人工 32 条标注。可以先跑 lab，再让 PPO-8 通过 `--split-plan "$LAB_RUN/plan.json"` 复用已经冻结并校验的划分；此时 **不要同时传 `--fresh-lineage`**，审计谱系从供应者继承。单卡下按顺序运行这两个监督器，使用不同结果目录，不要并发占同一张卡。
+
+#### 4.4.3 Delta／Reflexion／ExpeL 正式 ALF 对照
+
+代码为 `ttcl/alfworld_comparison/`，已完成结果和协议见 2.4。额外需要 `embedding` 下载项；三个方法共享 Qwen 底座，Reflexion 和 ExpeL 不需要下载另一个已训练生成模型。其原机入口默认要求 `experience_evolution`、`experience_v2`、`experience_repair`、`experience_design` 四个项目的历史任务清单，以复现完整污染审计。**它不是只完成最小 PPO 路线后就能直接运行的无依赖入口**；完整重跑先按 4.3、4.5 重建依赖，参数和原始命令见 2.4 及模块 `--help`。如果在新谱系下另建正式对照，须先明确调整、记录对应审计协议和硬件配置，不能冒充本文原机的 2010 条结果。
+
+### 4.5 新轨迹必须重新审核标注
 
 修复实验不依赖 `/tmp/experience_repair_histories.json`。`annotations.py` 只保留通用加载、内容绑定检查和经验构造逻辑，真实 32 条监督目标存放在 ignored 的 `data/annotations/experience_repair_reviewed.json`；可用 `TTCL_REPAIR_ANNOTATIONS` 指定另一份审核文件。
 
@@ -342,7 +462,7 @@ python -m ttcl.experience_evolution.analyze --root "$TASK_RUN"
 
 审核完成后才运行 `experience_repair.run prepare/supervise`，再运行 `experience_design.run prepare/supervise`。后者的 SQL/工具 80 条数据由执行代码生成；ALF 的 48 个输入仍依赖已审核的修复历史，不能凭空重建。历史正文里的分数是原机结果，不应作为新服务器重跑分数填入报告。
 
-### 4.5 上传和检查
+### 4.6 上传和检查
 
 ```bash
 # 检查本地暂存内容，不应出现模型、数据、运行结果、凭据或子模块
@@ -350,7 +470,12 @@ python3 scripts/check_repository.py
 # 不需要下载模型的路径与纯逻辑检查；缺历史数据的集成测试会明确跳过
 python -m unittest discover -s scripts -p 'test_*.py'
 python -m unittest ttcl.experience_repair.test_run ttcl.experience_design.test_design
+CUDA_VISIBLE_DEVICES='' python -m unittest ttcl.experience_coop.test_prepare \
+  ttcl.experience_coop.test_protocol ttcl.experience_coop.test_collection \
+  ttcl.experience_coop.test_correction ttcl.experience_coop.test_learning
 ```
+
+本次迁移检查：38 项路径、下载器、数据来源、奖励／校正及训练逻辑测试通过；临时只含 Git 文件的新目录成功建立兼容路径与 CLI，并在挂接只读本地资源、仅提供初始 Delta 谱系后完成 PPO-8 准备与冻结校验（160 段历史、16 批／分支、ALF train/dev/test 为 384/48/134 且场景互斥）。未在目标服务器实际安装环境或重新完成 GPU 训练；目标机器仍应按上述顺序检查。原机正在运行的校正版冻结文件也已复核未变。
 
 仅修改说明、代码和配方后正常 git add/commit/push。不要使用 `git add -f` 上传被忽略的资产或兼容链接，不需要 Git LFS。上游许可继续适用；移除旧 `.git` 不改变代码来源或许可证。
 

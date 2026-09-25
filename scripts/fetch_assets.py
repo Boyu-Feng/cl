@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -38,6 +39,20 @@ def fetch(name):
         }[name]
         snapshot_download(repo_id=repo, local_dir=ROOT/rel)
         print(f'Downloaded {repo} to {rel}')
+    elif name == 'clbench-db':
+        from huggingface_hub import hf_hub_download
+        repo = (os.environ.get('CL_BENCHMARK_DB_REPO') or
+                'continual-learning-bench/database-exploration').strip()
+        directory = ROOT/'data/clbench/database_exploration'
+        directory.mkdir(parents=True, exist_ok=True)
+        for filename in ('products.db', 'products_drifted.db'):
+            path = directory/filename
+            if not path.is_file():
+                hf_hub_download(repo_id=repo, repo_type='dataset', filename=filename,
+                                local_dir=str(directory), token=os.environ.get('HF_TOKEN'))
+            if not path.is_file():
+                raise FileNotFoundError(f'Expected {path} after Hugging Face download')
+        print(f'CLBench databases ready in {directory}')
     elif name == 'alfworld':
         directory = ROOT/'data/ttcl/alfworld_delta'
         archive = directory/'games_complete.zip'
@@ -69,14 +84,14 @@ def fetch(name):
             subprocess.run(['git','-C',tmp,'checkout',meta['commit'],'--','data'],check=True)
             dest = ROOT/'data/clbench'
             shutil.copytree(Path(tmp)/'data',dest,dirs_exist_ok=True)
-        print('Pinned CLBench public files restored. Large database files additionally require clbench setup database_exploration.')
+        print('Pinned CLBench public files restored. Download SQLite files separately with: python scripts/fetch_assets.py clbench-db.')
     else:
         raise ValueError(name)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('assets', nargs='+', choices=['base','embedding','alfworld','locomo','clbench-data'])
+    parser.add_argument('assets', nargs='+', choices=['base','embedding','alfworld','locomo','clbench-data','clbench-db'])
     args = parser.parse_args()
     subprocess.run([sys.executable,str(ROOT/'scripts/prepare_workspace.py')],check=True)
     for asset in args.assets:

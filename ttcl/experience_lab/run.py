@@ -180,10 +180,11 @@ def main():
     p.add_argument('command',choices=['prepare','launch','supervise','collect-shard','train','evaluate-shard','status','verify'])
     p.add_argument('--root',type=Path,default=DEFAULT_ROOT)
     p.add_argument('--gpu',type=int,default=1);p.add_argument('--port',type=int,default=18277)
+    p.add_argument('--fresh-lineage',action='store_true',help='Audit a newly trained local Delta lineage')
     p.add_argument('--rounds',type=int,default=2);p.add_argument('--round');p.add_argument('--shard')
     p.add_argument('--stage',choices=['development','test']);p.add_argument('--arm')
     a=p.parse_args();root=a.root.resolve()
-    if a.command=='prepare':print(prepare(root,a.gpu,a.port,a.rounds))
+    if a.command=='prepare':print(prepare(root,a.gpu,a.port,a.rounds,fresh_lineage=a.fresh_lineage))
     elif a.command=='launch':print(launch(root))
     elif a.command=='collect-shard':collect_shard(root,a.round,a.shard)
     elif a.command=='train':
