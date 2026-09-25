@@ -136,35 +136,41 @@ def supervise(root):
     server=None;process=None
     try:
         wait_for_gpu(root,plan)
-        save(root/'status.json',{'phase':'server_preflight','gpu':plan['gpu'],'time':time.time()})
-        server=open_server(root,'source_collection',{'original_delta':plan['initial_adapter'],
-                                                     'reader_initial':plan['initial_reader']})
-        server_preflight(root,plan)
-        save(root/'status.json',{'phase':'collecting_shared_sources','expected':len(plan['histories']),
-                                'supervisor_pid':os.getpid(),'time':time.time()})
-        shards=sorted({h.get('family',h['domain']) for h in plan['histories']})
-        workers(root,'source-shard',[(s,['--shard',s]) for s in shards],'sources')
-        freeze_sources(root);stop_server(server);server=None
+        if not plan.get('reused_initial_rollouts'):
+            save(root/'status.json',{'phase':'server_preflight','gpu':plan['gpu'],'time':time.time()})
+            server=open_server(root,'source_collection',{'original_delta':plan['initial_adapter'],
+                                                         'reader_initial':plan['initial_reader']})
+            server_preflight(root,plan)
+            save(root/'status.json',{'phase':'collecting_shared_sources','expected':len(plan['histories']),
+                                    'supervisor_pid':os.getpid(),'time':time.time()})
+            shards=sorted({h.get('family',h['domain']) for h in plan['histories']})
+            workers(root,'source-shard',[(s,['--shard',s]) for s in shards],'sources')
+            freeze_sources(root);stop_server(server);server=None
         states={arm:{'writer':plan['initial_adapter'],'reader':plan['initial_reader'],
                      'writer_optimizer':None,'reader_optimizer':None} for arm in plan['arms']}
         # Interleave conditions at the same block, each retaining its own optimizer.
         for block in plan['blocks']:
             bid=block['id']
             for arm in plan['arms']:
-                directory=root/'training'/arm/bid;directory.mkdir(parents=True,exist_ok=False)
+                directory=root/'training'/arm/bid
+                reused=plan.get('reused_initial_rollouts')==bid
+                directory.mkdir(parents=True,exist_ok=reused)
                 state=states[arm]
                 save(directory/'block_input.json',dict(state,arm=arm,block=bid,
                     hashes=checkpoint_hashes([*state.values(),root/'source_audit.json']),
                     routing='Writer and reader are separate alternatives on a frozen shared base'))
-                adapters={'writer_current':state['writer']}
-                if arm=='dual': adapters['reader_current']=state['reader']
-                server=open_server(root,f'{arm}_{bid}',adapters)
-                save(root/'status.json',{'phase':'ppo_rollout','arm':arm,'block':bid,
-                    'blocks_per_arm':len(plan['blocks']),'rollout_per_history':8,'time':time.time()})
-                jobs=[(hid,['--arm',arm,'--block',bid,'--history',hid]) for hid in block['histories']]
-                workers(root,'collect-history',jobs,f'{arm}_{bid}_rollout')
-                counts=freeze_block(root,arm,bid)
-                stop_server(server);server=None
+                if reused:
+                    counts=read(directory/'dataset_audit.json')['examples']
+                else:
+                    adapters={'writer_current':state['writer']}
+                    if arm=='dual': adapters['reader_current']=state['reader']
+                    server=open_server(root,f'{arm}_{bid}',adapters)
+                    save(root/'status.json',{'phase':'ppo_rollout','arm':arm,'block':bid,
+                        'blocks_per_arm':len(plan['blocks']),'rollout_per_history':8,'time':time.time()})
+                    jobs=[(hid,['--arm',arm,'--block',bid,'--history',hid]) for hid in block['histories']]
+                    workers(root,'collect-history',jobs,f'{arm}_{bid}_rollout')
+                    counts=freeze_block(root,arm,bid)
+                    stop_server(server);server=None
                 for role in (['writer','reader'] if arm=='dual' else ['writer']):
                     save(root/'status.json',{'phase':'ppo_update','arm':arm,'block':bid,'role':role,
                                             'examples':counts[role],'time':time.time()})
@@ -214,17 +220,21 @@ def launch(root):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('command',choices=['prepare','init-reader','launch','supervise','source-shard',
+    p.add_argument('command',choices=['prepare','recover','init-reader','launch','supervise','source-shard',
         'collect-history','train','evaluate-shard','status','verify'])
     p.add_argument('--root',type=Path,default=DEFAULT_ROOT)
     p.add_argument('--split-plan',type=Path,default=DEFAULT_SPLITS)
     p.add_argument('--gpu',type=int,default=3);p.add_argument('--port',type=int,default=18287)
-    p.add_argument('--predecessor',type=Path)
+    p.add_argument('--predecessor',type=Path);p.add_argument('--origin',type=Path)
     p.add_argument('--arm',choices=['writer_only','dual']);p.add_argument('--role',choices=['writer','reader'])
     p.add_argument('--block');p.add_argument('--history');p.add_argument('--shard')
     p.add_argument('--stage',choices=['development','test'])
     a=p.parse_args();root=a.root.resolve()
     if a.command=='prepare': print(prepare(root,a.split_plan,a.gpu,a.port,a.predecessor))
+    elif a.command=='recover':
+        from .recovery import prepare_recovery
+        if a.origin is None: p.error('--origin is required for recover')
+        print(prepare_recovery(root,a.origin,a.gpu,a.port))
     elif a.command=='init-reader':
         from .learning import initialize_reader
         verify(root);print(initialize_reader(root))

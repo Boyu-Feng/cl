@@ -68,6 +68,17 @@ class LearningTests(unittest.TestCase):
             hashes=checkpoint_hashes([directory/'writer_dataset.json',directory/'reader_dataset.json',directory/'fixtures'])
             save(directory/'dataset_audit.json',{'hashes':hashes})
             for role in ['writer','reader']:
+                if role=='reader':
+                    plan['training'].update(rollout_correction='decoupled_token_is',is_max_weight=2.,
+                        reject_token_ratio=4.,max_rejected_fraction=.2,max_domain_rejected_fraction=.4)
+                    save(root/'plan.json',plan)
+                    path=Path(datasets[role][0]['path']);packet=read(path)
+                    packet['sample']['old_logp']=[v-.25 for v in packet['sample']['old_logp']]
+                    packet['sample']['sample_binding']=binding({k:packet['sample'][k] for k in
+                        ['input_ids','prompt_length','old_logp','input_binding','model','seed']})
+                    save(path,packet)
+                    save(directory/'dataset_audit.json',{'hashes':checkpoint_hashes([
+                        directory/'writer_dataset.json',directory/'reader_dataset.json',directory/'fixtures'])})
                 train(root,'dual','block_000',role,device='cpu')
                 output=directory/role
                 result=read(output/'audit.json')
@@ -76,6 +87,10 @@ class LearningTests(unittest.TestCase):
                 self.assertNotEqual(result['adapter_before'],result['adapter_after'])
                 self.assertEqual(read(output/'status.json')['steps'],4)
                 self.assertTrue((output/'optimizer.pt').exists())
+                if role=='reader':
+                    self.assertEqual(result['rollout_correction'],'decoupled_token_is')
+                    self.assertGreater(result['max_behavior_logp_mae'],.15)
+                    self.assertEqual(result['rejected_samples'],0)
             for p,h in inputs['hashes'].items():
                 from ttcl.experience_v2.common import sha_file
                 self.assertEqual(sha_file(p),h)

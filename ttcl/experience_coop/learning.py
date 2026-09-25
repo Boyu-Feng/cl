@@ -49,18 +49,35 @@ def selected_logps(model, sample, device):
     return -F.cross_entropy(logits,labels,reduction='none')
 
 
-def ppo_loss(selected, old, reference, advantage, clip=.2, beta=.01):
+def rollout_correction(anchor, behavior, maximum=2., reject_ratio=4.):
+    """Detached token-TIS; reject an action if any token differs by >4x.
+
+    The sampled behavior distribution remains explicit. The PPO anchor is a
+    separate, frozen pre-update forward pass through the training backend.
+    """
+    import torch
+    difference=(anchor-behavior).detach()
+    if not torch.isfinite(difference).all():
+        raise FloatingPointError('Nonfinite rollout/training difference')
+    keep=bool(difference.abs().max() <= math.log(reject_ratio))
+    weights=difference.clamp(-20.,20.).exp().clamp(max=maximum).detach()
+    return weights, keep
+
+
+def ppo_loss(selected, old, reference, advantage, clip=.2, beta=.01, correction=None):
     import torch
     log_ratio=selected-old
     if not torch.isfinite(log_ratio).all() or log_ratio.detach().abs().max()>20:
         raise FloatingPointError('Unstable PPO probability ratio')
     ratio=log_ratio.exp()
-    policy=-torch.minimum(ratio*advantage,ratio.clamp(1-clip,1+clip)*advantage).mean()
+    terms=-torch.minimum(ratio*advantage,ratio.clamp(1-clip,1+clip)*advantage)
+    weights=1. if correction is None else correction.detach()
+    policy=(weights*terms).mean()
     # k3 sampled-token KL estimator, not a claim to compute full-vocabulary KL.
     difference=reference-selected
     if difference.detach().abs().max()>20:
         raise FloatingPointError('Unstable reference probability ratio')
-    kl=(difference.exp()-difference-1).mean()
+    kl=(weights*(difference.exp()-difference-1)).mean()
     return policy+beta*kl, policy, kl, float(((ratio-1).abs()>clip).float().mean().detach())
 
 
@@ -116,7 +133,10 @@ def train(root, arm, block_id, role, device='cuda:0'):
     previous_optimizer=inputs.get(role+'_optimizer')
     if previous_optimizer:
         optimizer.load_state_dict(torch.load(previous_optimizer,map_location=device,weights_only=True))
-    references=[]; mismatches=[]
+    references=[]; mismatches=[]; anchors=[]; corrections=[]; retained=[]
+    correction_mode=cfg.get('rollout_correction','strict')
+    if correction_mode not in ['strict','decoupled_token_is']:
+        raise ValueError('Unknown behavior probability handling')
     # Validate the entire rollout while it still corresponds to the exact current
     # checkpoint. Checking after minibatch updates would confuse learning with drift.
     model.eval()
@@ -125,9 +145,14 @@ def train(root, arm, block_id, role, device='cuda:0'):
             current=selected_logps(model,sample,device)
             old=torch.tensor(sample['old_logp'],device=device)
             mismatch=float((current-old).abs().mean())
-            if mismatch>cfg['max_behavior_logp_mae']:
+            if correction_mode=='strict' and mismatch>cfg['max_behavior_logp_mae']:
                 raise ValueError(f'Behavior/training probability mismatch at {index}: {mismatch}')
             mismatches.append(mismatch)
+            if correction_mode=='decoupled_token_is':
+                weights,keep=rollout_correction(current,old,cfg['is_max_weight'],cfg['reject_token_ratio'])
+                anchors.append(current.detach().cpu());corrections.append(weights.cpu());retained.append(keep)
+            else:
+                anchors.append(old.cpu());corrections.append(None);retained.append(True)
             if role=='writer':
                 model.set_adapter('reference')
                 references.append(selected_logps(model,sample,device).cpu())
@@ -138,6 +163,19 @@ def train(root, arm, block_id, role, device='cuda:0'):
         if index%16==0:
             save(output/'status.json',{'phase':'checking_behavior_probabilities','checked':index+1,
                                       'total':len(samples),'time':time.time()})
+    rejected=[i for i,keep in enumerate(retained) if not keep]
+    behavior_audit={'mode':correction_mode,'samples':len(rows),'retained':sum(retained),
+        'rejected_indices':rejected,'above_original_mae_threshold':sum(v>cfg['max_behavior_logp_mae'] for v in mismatches),
+        'maximum_mae':max(mismatches),'mean_mae':statistics.mean(mismatches),
+        'by_domain':{d:{'total':sum(r['domain']==d for r in rows),
+            'rejected':sum(rows[i]['domain']==d for i in rejected)} for d in sorted({r['domain'] for r in rows})},
+        'raw_rollout_logps_preserved':True,'test_outcomes_used':False}
+    save(output/'behavior_audit.json',behavior_audit)
+    if correction_mode=='decoupled_token_is':
+        if len(rejected)/len(rows)>cfg['max_rejected_fraction'] or any(
+                v['rejected']/v['total']>cfg['max_domain_rejected_fraction'] for v in behavior_audit['by_domain'].values()):
+            raise ValueError('Too much rollout/training mismatch for bounded importance correction')
+        torch.save({'anchors':anchors,'weights':corrections,'retained':retained},output/'behavior_correction.pt')
     domain_mass=defaultdict(float)
     for row in rows: domain_mass[row['domain']]+=row.get('within_episode_weight',1.)
     weights=[row.get('within_episode_weight',1.)/domain_mass[row['domain']]/len(domain_mass) for row in rows]
@@ -149,11 +187,14 @@ def train(root, arm, block_id, role, device='cuda:0'):
             batch=order[start:start+batch_size];optimizer.zero_grad(set_to_none=True)
             metrics=[]
             for i in batch:
+                if not retained[i]:
+                    metrics.append((0.,0.,0.));continue
                 model.set_adapter('default');model.train()
                 selected=selected_logps(model,samples[i],device)
-                old=torch.tensor(samples[i]['old_logp'],device=device)
+                old=anchors[i].to(device)
                 loss,policy,kl,clipped=ppo_loss(selected,old,references[i].to(device),rows[i]['advantage'],
-                                               cfg['clip_range'],cfg['kl_beta'])
+                                               cfg['clip_range'],cfg['kl_beta'],
+                    None if corrections[i] is None else corrections[i].to(device))
                 if not torch.isfinite(loss): raise FloatingPointError('Nonfinite PPO loss')
                 (loss*len(rows)*weights[i]/len(batch)).backward()
                 metrics.append((float(policy.detach()),float(kl.detach()),clipped))
@@ -176,6 +217,7 @@ def train(root, arm, block_id, role, device='cuda:0'):
     save(output/'audit.json',{'base_unchanged':True,'reference_unchanged':True,
         'base_sha256':before,'adapter_before':adapter_before,'adapter_after':fingerprint(model,True),
         'other_role_checkpoint_unchanged':True,'role':role,'sample_count':len(samples),
+        'rollout_correction':correction_mode,'retained_samples':sum(retained),'rejected_samples':len(rejected),
         'positive':sum(r['advantage']>0 for r in rows),'negative':sum(r['advantage']<0 for r in rows),
         'zero':sum(r['advantage']==0 for r in rows),'domains':dict(domain_mass),
         'max_behavior_logp_mae':max(mismatches),'mean_behavior_logp_mae':statistics.mean(mismatches),
