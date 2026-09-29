@@ -31,7 +31,44 @@ def download(url, path):
 
 
 def fetch(name):
-    if name in {'base', 'embedding'}:
+    if name in {'apex-data', 'apex-models', 'apex-qwen4b-data'}:
+        spec = json.loads((ROOT/'config/apex-reproduction.json').read_text())
+        if name == 'apex-models':
+            from huggingface_hub import snapshot_download
+            for model in spec['base_models']:
+                snapshot_download(repo_id=model['repo'], revision=model['revision'],
+                                  local_dir=str(ROOT/model['directory']),
+                                  allow_patterns=model['allow_patterns'])
+                print(f"Base prerequisite ready: {model['repo']} (not an APEx checkpoint)", flush=True)
+        else:
+            dataset = spec['dataset']
+            directory = ROOT/dataset['directory']
+            records = []
+            for item in dataset['files']:
+                if name == 'apex-qwen4b-data' and item['role'] == 'offline_search_cache':
+                    continue  # Qwen4B uses official captions, not image retrieval.
+                path = directory/item['filename']
+                if path.is_file():
+                    with path.open('rb') as source:
+                        digest = hashlib.file_digest(source, 'sha256').hexdigest()
+                    if digest != item['sha256']:
+                        raise ValueError(f'Existing asset hash mismatch: {path}; refusing overwrite')
+                else:
+                    url = (f"https://huggingface.co/datasets/{dataset['repo']}/resolve/"
+                           f"{dataset['revision']}/{item['filename']}")
+                    pending = path.with_name(path.name+'.verified-download')
+                    print(f"Downloading {item['filename']} ({item['bytes']} bytes)", flush=True)
+                    digest = download(url, pending)
+                    if digest != item['sha256'] or pending.stat().st_size != item['bytes']:
+                        raise ValueError(f'Download integrity failure: {pending}')
+                    pending.replace(path)
+                records.append({**item, 'verified_sha256': digest})
+                print(f"Verified {item['filename']}", flush=True)
+            (directory/'download_provenance.json').write_text(json.dumps({
+                'repo':dataset['repo'], 'revision':dataset['revision'], 'files':records,
+                'note':'Official APEx prerequisite data; not CLBench training or evaluation output.'
+            },indent=2)+'\n')
+    elif name in {'base', 'embedding'}:
         from huggingface_hub import snapshot_download
         repo, rel = {
             'base':('Qwen/Qwen3-4B-Instruct-2507','models/delta_mem/Qwen3-4B-Instruct-2507'),
@@ -91,7 +128,7 @@ def fetch(name):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('assets', nargs='+', choices=['base','embedding','alfworld','locomo','clbench-data','clbench-db'])
+    parser.add_argument('assets', nargs='+', choices=['base','embedding','alfworld','locomo','clbench-data','clbench-db','apex-data','apex-models','apex-qwen4b-data'])
     args = parser.parse_args()
     subprocess.run([sys.executable,str(ROOT/'scripts/prepare_workspace.py')],check=True)
     for asset in args.assets:

@@ -93,6 +93,36 @@
           "checkout_path": "current_work/reflexion/programming_runs/executors/leetcode_env"
         }
       ]
+    },
+    "SDPO_reference": {
+      "path": "current_work/SDPO_reference",
+      "url": "https://github.com/lasgroup/SDPO.git",
+      "commit": "7c457fc1b1f636ae794eb0362ba37d4743b06fbc",
+      "licenses": [
+        "current_work/SDPO_reference/LICENSE"
+      ],
+      "submodules": [],
+      "source_note": "Selected unmodified official source files for SDPO loss/actor/teacher construction, not a full veRL checkout. CLBench runner executes official loss AST unchanged; distributed launcher is replaced by a local online LoRA implementation."
+    },
+    "APEx": {
+      "path": "current_work/APEx",
+      "url": "https://github.com/J-Ding519/APEx.git",
+      "commit": "dfa88ea893950f77712fa7bcd50ff3785d37a4d8",
+      "licenses": [],
+      "submodules": [],
+      "source_note": "Complete unmodified official source snapshot, excluding nested .git metadata. Upstream provides no standalone LICENSE file in this commit; original source copyright headers preserved. APEx checkpoints were not linked in README; LightningCreeper/MIA checkpoints belong to MIA, not verified APEx checkpoints."
+    },
+    "MemRL": {
+      "path": "current_work/MemRL",
+      "url": "https://github.com/MemTensor/MemRL",
+      "commit": "c1b322ca43de36ddf64c6712f89d0095bfc35ce0",
+      "archive_url": "https://codeload.github.com/MemTensor/MemRL/tar.gz/c1b322ca43de36ddf64c6712f89d0095bfc35ce0",
+      "archive_sha256": "ddfdcf72296147a8233ca815fbda00700a0197f892f5b7d9dd65d54c02053b01",
+      "licenses": [
+        "current_work/MemRL/LICENSE"
+      ],
+      "submodules": [],
+      "source_note": "Unmodified archive sources; data relocated to ignored data/memrl. Method adapter lives in ttcl/memrl_comparison."
     }
   }
 }

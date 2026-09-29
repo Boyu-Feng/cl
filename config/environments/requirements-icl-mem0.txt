@@ -1,0 +1,16 @@
+# Isolated Python 3.12 worker environment. vLLM stays in the mainline server environment.
+mem0ai[nlp]==2.0.0
+qdrant-client==1.17.1
+sentence-transformers==4.1.0
+spacy==3.8.16
+fastembed==0.8.1
+torch==2.7.0
+transformers==4.52.4
+numpy==2.2.6
+pandas==3.0.5
+scipy==1.15.3
+pydantic==2.13.5
+requests==2.34.2
+huggingface_hub==0.36.2
+sentencepiece==0.2.2
+PyYAML==6.0.3

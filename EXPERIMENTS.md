@@ -1,12 +1,183 @@
 # CL：经验学习实验与从零复现
 
-整理时间：2026-09-25；本次训练快照截至 **10:13 UTC**。本文件是本项目实验说明的统一入口。历史说明全文在末尾按原路径归档；旧报告中的“正在运行”“尚未启动”只代表当时状态，当前进度以本节与原始 JSON 为准。
+整理时间：2026-09-29；最新结果核对截至 **06:28 UTC**。本文件是实验结果、权重／数据下载和新服务器复现的统一入口。[最新结果见第 0 节](#latest-results)，[下载清单见第 4.2 节](#download-assets)。历史说明全文继续按原路径归档，带日期的“正在运行”“尚未启动”只代表当时状态。
 
 本 Git 仓库只包含代码、实验说明、环境版本和重跑配方，不提交模型权重、训练数据、原始轨迹、运行结果或本机凭据。历史实验结论保留在本文；clone 不会恢复旧 checkpoint 或原始分数。
 
+<a id="latest-results"></a>
+
+## 0. 最新实验结果（2026-09-29，06:28 UTC）
+
+本节替代旧快照中的实时进度描述；后文带日期的训练日志与历史原文继续保留。核对时没有发现仍在运行的 CL 实验 worker。完成、有效评分、失败与未运行分别报告；下表中的记录数包含各方法和种子的重复执行，不等于不同题目数。
+
+ALFWorld 使用官方成功率；CLBench 使用各领域官方 reward，均越高越好，不求跨领域总均分。除特别说明外，表内取该轮各组共同有效的任务—种子交集，缺失不补零。旧 Delta writer 与官方 Delta-Mem 是不同方法。
+
+| 实验 | 记录进度 | 评分或停止状态 |
+|---|---|---|
+| ALFWorld 旧五组基线 | 2010/2010 | 全部完成；每组 402 配对、最多三次尝试 |
+| MemRL | 1844/1844 | 1841 可评分、3 失败；已结束 |
+| 全历史 ICL / Mem0 | 1560/1560 | 1355 可评分、205 失败；已结束 |
+| 官方 Delta-Mem ALFWorld | 1206/1206 | 1206 可评分 |
+| 官方 Delta-Mem CLBench | 1200/1386 | 1165 有效最终 reward；剩余 186 条被 Docker 权限阻塞 |
+| PPO-8 两训练分支 | 各 16/16 批 | 固定最终 block_015；开发集 1056/1056，未通过预设收益门槛 |
+| PPO-8 后续测试 | 4995/8016 | ALFWorld 3216/3216 完成；CLBench 1779/4800，数据库 worker 错误后停止 |
+| SDPO online LoRA | 542/1040 | 253 次参数更新；频谱两条链完成，其余六条链 CUDA OOM |
+| APEx Qwen4B 全参数 | 无完整评估结果 | 训练失败：On-policy probability mismatch: 0.191162109375 |
+
+### 0.1 ALFWorld：完整 134 题、三个种子的基线结果
+
+每组 402 个配对。首次指标与三次内成功分别列出；MemRL 为同预算本地适配，不是论文原版完整训练。官方 Delta-Mem 使用 HF/FlashAttention，旧基线和 MemRL 使用 vLLM；跨轮差值是描述性参考。
+
+| 轮次 | 方法 | 首次成功率 | 三次内成功率 |
+|---|---|---|---|
+| 旧基线 | 无记忆 | 19.40% | 25.12% |
+| 旧基线 | 未训练 writer | 17.16% | 30.85% |
+| 旧基线 | 旧 Delta writer | 18.41% | 36.07% |
+| 旧基线 | Reflexion | 19.40% | 49.75% |
+| 旧基线 | ExpeL | 32.34% | 35.07% |
+| 官方 Delta-Mem | 同轮 base | 20.15% | 25.62% |
+| 官方 Delta-Mem | 每题重置状态 | 15.92% | 24.63% |
+| 官方 Delta-Mem | 跨题 online | 16.17% | 25.37% |
+| MemRL | 同轮无记忆 | 20.15% | 26.87% |
+| MemRL | MemRL | 34.83% | 56.72% |
+
+MemRL 分任务的三次内成功率如下。查看物体任务下降，其余五类上升，不能只报告总分而省略负迁移。
+
+| 任务家族 | 配对数 | 无记忆 | MemRL |
+|---|---|---|---|
+| look_at_obj_in_light | 54 | 70.37% | 35.19% |
+| pick_and_place_simple | 72 | 58.33% | 86.11% |
+| pick_clean_then_place_in_recep | 93 | 1.08% | 54.84% |
+| pick_cool_then_place_in_recep | 63 | 7.94% | 50.79% |
+| pick_heat_then_place_in_recep | 69 | 17.39% | 47.83% |
+| pick_two_obj_and_place | 51 | 19.61% | 60.78% |
+
+### 0.2 CLBench：MemRL、Mem0、官方 Delta-Mem 与 SDPO
+
+**MemRL，后 80% 主指标，两组共同有效交集。** Cohort 后 80% 的 32 次检索均为空，该领域分差不能归因于注入经验。
+
+| 领域 | 配对数 | 无记忆 | MemRL | 差值 |
+|---|---|---|---|---|
+| 频谱 | 144 | 0.219200 | 0.218887 | -0.000313 |
+| Poker | 192 | -2.320312 | 0.096354 | +2.416667 |
+| Database | 48 | 0.038890 | 0.108335 | +0.069446 |
+| Cohort | 31 | -0.015706 | -0.016474 | -0.000768 |
+
+**全历史 ICL / Mem0。** 同时列全序列与后 80%；每行采用三组共同有效交集，因此包含 ICL 的失败筛选效应，不等于 Mem0 / none 两组分析。Cohort 三组交集为空。Mem0 没有本地 ALFWorld 结果。
+
+| 领域 | 范围 | 配对数 | 无记忆 | 全历史 ICL | Mem0 |
+|---|---|---|---|---|---|
+| 频谱 | 全序列 | 133 | 0.218202 | 0.229574 | 0.219809 |
+| Poker | 全序列 | 173 | -1.439306 | -3.280347 | -4.161850 |
+| Database | 全序列 | 43 | 0.069770 | 0.196898 | 0.161242 |
+| Cohort | 全序列 | 0 | — | — | — |
+| 频谱 | 后 80% | 97 | 0.217178 | 0.222192 | 0.219381 |
+| Poker | 后 80% | 128 | -0.734375 | 0.031250 | -6.707031 |
+| Database | 后 80% | 32 | 0.093753 | 0.247916 | 0.100003 |
+| Cohort | 后 80% | 0 | — | — | — |
+
+**官方 Delta-Mem。** CL 从旧测试后 80% 开始；Database 只覆盖旧 20 题中的 16 道测试题，MemRL/Mem0 使用完整 30 题。最多三次口径为首次官方成功即停止，否则取最后一次 reward，不取最高 reward。Cohort 大量缺失；Sales / Codebase 尚未运行。
+
+| 领域 | 指标 | 配对数 | Base | 每题重置 | 跨题 online |
+|---|---|---|---|---|---|
+| 频谱 | 首次 | 144 | 0.219200 | 0.219200 | 0.219200 |
+| 频谱 | 最多三次后的最终奖励 | 144 | 0.219200 | 0.219200 | 0.219200 |
+| Poker | 首次 | 192 | 0.205729 | -0.403646 | -0.932292 |
+| Poker | 最多三次后的最终奖励 | 192 | 1.106771 | -0.575521 | -0.203125 |
+| Database | 首次 | 32 | 0.052084 | 0.037500 | 0.052084 |
+| Database | 最多三次后的最终奖励 | 32 | 0.066669 | 0.039584 | 0.058334 |
+| Cohort | 首次 | 5 | -0.002813 | -0.038466 | -0.026724 |
+| Cohort | 最多三次后的最终奖励 | 9 | 0.010484 | -0.001905 | -0.025878 |
+
+**SDPO，当前已完成记录的全部共同配对。** 只有频谱结束；其他领域是 OOM 中断结果，不作完整方法排名。
+
+| 领域 | 配对数 | Frozen | SDPO online | 状态 |
+|---|---|---|---|---|
+| 频谱 | 180 | 0.219552 | 0.219552 | 完成 |
+| Poker | 86 | 1.552326 | 1.075581 | OOM 中断 |
+| Database | 3 | 0.244433 | 0.244433 | OOM 中断 |
+| Cohort | 2 | -0.051639 | -0.051639 | OOM 中断 |
+
+旧 writer 七组 CLBench 结果保留在 2.1。Reflexion / ExpeL 的原定后 80% 测试对照如下；无经验、ExpeL 每题一次，Retry、Reflexion 最多三次。
+
+四列配对数依次为 144、192、32、26。
+
+| 方法 | 频谱 | Poker | Database | Cohort |
+|---|---|---|---|---|
+| none | 0.219200 | 0.611979 | 0.056253 | -0.013199 |
+| retry_none | 0.219200 | 0.580729 | 0.070837 | -0.001961 |
+| reflexion | 0.219072 | -1.664062 | 0.060419 | 0.006908 |
+| expel | 0.219200 | -0.901042 | 0.025000 | -0.014352 |
+
+### 0.3 PPO-8：开发与测试分开报告
+
+`dual_writer_base` = 联合训练后的 writer + 冻结原 reader；`old_writer_reader` = 旧 Delta writer + 联合训练后的 reader。评估期间所有权重冻结，经验文本继续跨题更新。以下均为单次尝试，排除每条链首题，使用八组共同有效交集。
+
+**开发集：1056/1056 完成。** ALFWorld 来自 train 场景的留出划分；计分为 42 道不同题 × 2 种子，而不是 84 道独立题。Poker 7 题 × 2；Database / Cohort 各 1 题 × 2。
+
+| 配置 | ALF 成功率 n=84 | 频谱 n=10 | Poker n=14 | Database n=2 | Cohort n=2 |
+|---|---|---|---|---|---|
+| 无记忆 | 29.76% | 0.217720 | 5.250000 | 0.000000 | -0.051045 |
+| 未训练 writer | 30.95% | 0.217720 | 1.178571 | 0.000000 | -0.032591 |
+| 旧 Delta writer + 原 reader | 29.76% | 0.217720 | 5.357143 | 0.000000 | -0.009498 |
+| PPO-8 writer + 原 reader | 25.00% | 0.217720 | 0.250000 | 0.000000 | -0.042656 |
+| 联合训练 writer + 原 reader | 39.29% | 0.217720 | 7.500000 | 0.000000 | -0.011623 |
+| 旧 writer + 新 reader | 14.29% | 0.217720 | -0.500000 | 0.000000 | -0.002712 |
+| 联合训练 writer + 新 reader | 20.24% | 0.217720 | 3.892857 | 0.000000 | -0.002628 |
+| 新 reader，无文本记忆 | 28.57% | 0.217720 | 1.142857 | 0.000000 | -0.013660 |
+
+**后续测试：4995/8016。** ALFWorld 134 题 × 3 种子 × 8 组全部完成；排除家族链首题后为 128 题 × 3 种子 = 384 配对。CLBench 的频谱/Poker/Database/Cohort 原始记录数为 1068/505/179/27，全部仍不完整，下面只报告已完成交集。测试不用于选 checkpoint 或调参。
+
+| 配置 | ALF 成功率 n=384 | 频谱 n=131 | Poker n=62 | Database n=20 | Cohort n=2 |
+|---|---|---|---|---|---|
+| 无记忆 | 17.19% | 0.219943 | -0.185484 | 0.050000 | 0.006164 |
+| 未训练 writer | 21.88% | 0.219943 | -1.443548 | 0.070000 | 0.009765 |
+| 旧 Delta writer + 原 reader | 23.96% | 0.219943 | -0.169355 | 0.016665 | -0.002620 |
+| PPO-8 writer + 原 reader | 20.83% | 0.219943 | 0.927419 | 0.000000 | 0.004117 |
+| 联合训练 writer + 原 reader | 20.05% | 0.219943 | -2.467742 | 0.000000 | 0.004405 |
+| 旧 writer + 新 reader | 24.48% | 0.219943 | 0.282258 | 0.000000 | -0.005003 |
+| 联合训练 writer + 新 reader | 17.45% | 0.219943 | 0.629032 | 0.036665 | -0.025057 |
+| 新 reader，无文本记忆 | 15.89% | 0.219943 | -0.604839 | 0.103335 | -0.002408 |
+
+开发集 `dual_writer_base` 为 33/84 = 39.29%，旧 Delta 为 25/84 = 29.76%；同配置在完整测试计分范围降到 77/384 = 20.05%，低于旧 Delta 的 92/384 = 23.96%。开发集 39.29% 未迁移成测试优势。Poker 开发值 7.5 只有 14 个配对，Cohort −0.011623 只有 2 个配对，不能以该行判断跨域泛化。
+
+测试的 `old_writer_reader` 为 94/384 = 24.48%，比旧 writer + 原 reader 只净多 2 次；逐配对 46 胜、44 负、294 平。三个种子分别净增加 +5、−8、+5 次成功。对 128 个任务聚类、保留各任务三个种子，以固定随机种子 20260929 bootstrap 10,000 次，增益 95% 区间为 −4.43～+5.21 个百分点；不能据此声称 reader 带来稳定提升。
+
+### 0.4 同题跨方法参考：对齐到 PPO 测试的 384 个配对
+
+以下重新按 PPO 排除首题后留下的 384 个 game / nominal seed 匹配各轮原始结果。各轮任务顺序及首题排除对象不同，所以数值也不同于各轮原生的 402 总体或 384 首题后汇总。任务匹配不能消除随机种子派生、后端、历史重试与记忆演化差别。
+
+MemRL / ExpeL / Reflexion / 官方 Delta-Mem 的首次成绩来自最多三次尝试的在线运行；此前题目的重试可影响后续记忆。该表是描述性参考，不是严格等总预算的单次尝试排行榜。
+
+| 方法 | 首次／单次成功率 | 同轮无记忆 | 增益（百分点） |
+|---|---|---|---|
+| MemRL | 35.16% | 20.31% | +14.84 |
+| ExpeL | 31.51% | 19.79% | +11.72 |
+| 旧 writer + 新 reader | 24.48% | 17.19% | +7.29 |
+| 旧 writer + 原 reader，同轮 | 23.96% | 17.19% | +6.77 |
+| PPO-8 writer | 20.83% | 17.19% | +3.65 |
+| 联合训练 writer + 原 reader | 20.05% | 17.19% | +2.86 |
+| Reflexion，首次 | 19.79% | 19.79% | +0.00 |
+| 联合训练 writer + reader | 17.45% | 17.19% | +0.26 |
+| 官方 Delta-Mem online | 15.89% | 20.57% | -4.69 |
+
+### 0.5 原始记录与复核入口
+
+下列路径属于原机 ignored 产物，GitHub 上传的是本文的结果摘要与代码，不包含这些原始数据：
+
+- `results/memrl_comparison/20260928_budgeted/{status,summary}.json`。
+- `results/icl_mem0_comparison/20260927/{status,summary}.json`。
+- `results/deltamem_comparison/20260926/{alfworld,clbench}/.../result.json`：本节从逐题文件重算，旧根目录 `summary.json` 曾停留在较早快照。
+- `results/experience_coop/20260925_ppo8_corrected/evaluation/development/summary.json` 与 `development_decision.json`。
+- `results/experience_coop_posteval/20260926_final_auto/evaluation/test/episodes/.../result.json`：从 4995 条原始记录重算，未采用旧 partial snapshot 的进度。
+- `results/sdpo_clbench/20260927_online_lora/{status,summary}.json`，以及 `results/apex_qwen4b/20260927_fullparam_v2/status.json`。
+- 本次分析保存到 `results/status_reports/20260929_all_results/`，含 132 行汇总、557 项指标的 CSV、源文件 SHA-256 绑定、reader 对比和统计口径。分析没有改写冻结实验输出。
+
+实验层面的待办仍是：修复或独立恢复 PPO CL 测试和 SDPO 的失败链；解决官方 Delta-Mem 的 Docker 阻塞；诊断 APEx 概率校验失败。整理或上传文档不会启动这些任务。
+
 ## 1. 研究目标与目录
 
-早期主线冻结 Qwen3-4B-Instruct-2507 执行模型，训练经验生成器根据已完成的轨迹、反馈和旧经验生成可供后续任务使用的经验。新实验另增独立 reader LoRA，研究文本经验提取与参数经验使用的协作；底座始终冻结，评估时两个 LoRA 也冻结。早期 Online LoRA、Delta-Mem、SEAL、RAMP 也包含直接更新参数的路线，不应和外部经验生成器混称为同一种训练。
+早期主线冻结 Qwen3-4B-Instruct-2507 执行模型，训练经验生成器根据已完成的轨迹、反馈和旧经验生成可供后续任务使用的经验。PPO-8 实验另增独立 reader LoRA，研究文本经验提取与参数经验使用的协作；该轮底座始终冻结，评估时两个 LoRA 也冻结。2026-09-27 起新增 SDPO 在线参数经验对照：在任务执行期间根据已经获得的公开反馈和 reward 更新 LoRA，并将参数持续带到下一题。早期 Online LoRA、Delta-Mem、SEAL、RAMP 也包含直接更新参数的路线，不应和外部经验生成器混称为同一种训练。
 
 | 路径 | 内容 |
 |---|---|
@@ -14,7 +185,7 @@
 | `results/` | 本地运行输出，Git 忽略；`ttcl/results` 链接到 `results/ttcl`，新探索直接使用 `results/experience_*` |
 | `data/` | 数据集、标注和下载缓存，Git 忽略 |
 | `models/` | 底座、检索模型和实验权重，Git 忽略 |
-| `current_work/` | CLBench、Delta-Mem、SEAL、GenericAgent、REEF、Reflexion、ExpeL 上游源码；模型路径为 ignored 兼容链接 |
+| `current_work/` | CLBench、Delta-Mem、SEAL、GenericAgent、REEF、Reflexion、ExpeL、MemRL、APEx 及 SDPO 选定上游源码；模型路径为 ignored 兼容链接 |
 | `config/` / `scripts/` | 环境清单、上游版本、资产布局、下载、检查和重跑工具 |
 
 `Delta-Mem` 上游方法与本项目的 `旧 Delta writer` 是不同对象。后者位于 `ttcl/results/experience_evolution/alfworld_delta_20260922/training/delta/adapter`。
@@ -41,9 +212,11 @@
 | `alfworld_comparison` | 134 道 ALF valid_unseen × 3 种子 × 5 方法，相同重试预算 | **2010/2010 完成**；Delta 145/402，Reflexion 200/402，ExpeL 141/402（最多三次成功） |
 | `experience_lab` | 两轮真实多域偏好收集，SFT／随机 SFT／DPO | 各 **792/792 开发记录完成**；均未通过门槛，未启动最终确认 |
 | `experience_coop` 原始严格版 | PPO rollout=8，writer-only／双 LoRA | 首批 reader 更新前概率校验失败；失败保留，不算完整训练 |
-| `experience_coop` 校正版 | 同初始策略，显式 token 重要性校正 | 两个 writer 均完成第 3/16 批；reader 第 3 批更新中，**尚无开发／测试结果** |
+| `experience_coop` 校正版 | 同初始策略，显式 token 重要性校正 | 两个分支 16/16 批完成；开发未通过门槛，后续测试 4995/8016，见第 0 节 |
+| `deltamem_comparison` / `icl_mem0_comparison` / `memrl_comparison` | 官方 Delta-Mem、全历史 ICL、Mem0、MemRL 本地对照 | 最新完成数、有效评分与逐域结果见第 0 节 |
+| `sdpo_clbench` / `apex_qwen4b` | 在线参数更新与 APEx 全参数迁移 | SDPO 部分 OOM；APEx 概率校验失败；保留负结果，见第 0 节 |
 
-新服务器优先阅读 [第 4 节](#4-从-github-clone-后重新实验)：下载清单见 4.2，旧 Delta 初始化见 4.3，最新 PPO-8 的从零启动命令见 4.4。当前结果依次见 2.4、2.5、2.6；第 5 节为历史原文，不代表当前运行状态。
+新服务器优先阅读 [第 4 节](#4-从-github-clone-后重新实验)：下载清单见 4.2，旧 Delta 初始化见 4.3，最新 PPO-8 的从零启动命令见 4.4。最新结果统一见第 0 节；2.4–2.11 说明协议与带日期快照，第 5 节为历史原文。
 
 ### 2.1 2026-09-23 七组反馈评估与基线
 
@@ -189,7 +362,7 @@ python -m ttcl.experience_lab.run status
 
 ### 2.6 PPO-8：文本经验提取器与参数经验使用器协作
 
-独立代码 `ttcl/experience_coop/`，首轮目录 `results/experience_coop/20260924_ppo8`。保持旧算法、运行和权重不变。该实验检验增加经验候选，以及训练执行模型使用经验是否能改善 ALFWorld 和真实 CLBench；尚无效果结论。
+独立代码 `ttcl/experience_coop/`，首轮目录 `results/experience_coop/20260924_ppo8`。保持旧算法、运行和权重不变。该实验检验增加经验候选，以及训练执行模型使用经验是否能改善 ALFWorld 和真实 CLBench。以下保留准备、恢复与带日期快照；2026-09-29 的最终开发结果及部分测试结果见第 0 节，尚未建立稳定的跨领域收益。
 
 - **两个角色**：writer 从旧 Delta 初始化，保留全部 36 层注意力 `q/k/v/o_proj` 的 rank-8 LoRA。reader 使用独立 rank-8、alpha-16 LoRA，挂在第 18–35 层（零起始）的注意力 `q/k/v/o_proj` 和 MLP `gate/up/down_proj`；B 矩阵零初始化，初始执行策略等于底座。后半层配置是待验证的架构假设，不声称最优。底座和词嵌入、输出头冻结；两个角色分别启用自己的 adapter，不直接合并 writer 和 reader 权重。
 - **数据**：继承 2.5 的完整训练／开发／测试角色划分及场景哈希审计。160 段训练历史来自 96 段 ALFWorld 和四个 CLBench 领域各 16 段。ALF 共用 384 个互不重复的训练场景；CLBench 历史含同题不同种子，数据库／队列各仅两个训练题，不能把重复执行称为新增独立题。先由原 Delta 和底座执行器生成共享历史、重新绑定公开输入；不读取旧实验结果来选题，不复用人工或旧自动标签。与 2.5 共用开发集，因此不声称这是研究者未见过的开发集。
@@ -260,6 +433,226 @@ CLBench 同样正在训练。dual 第 2／3 批原始均值如下，保持各领
 
 原始核查入口：`training/<arm>/block_*/histories/*/labels.json`（配对奖励）、`dataset_audit.json`（缺失与排除）、`<role>/training.jsonl`（loss、KL、步数）、`<role>/behavior_audit.json`（概率偏差与校正拒绝）、`status.json`（当前阶段）。这些是 ignored 的本机产物，本文记录结果摘要，Git 中不包含其原始文件。
 
+#### 训练后自动完整评测：2026-09-26 用户追加要求
+
+用户要求 PPO-8 训练结束后直接评测训练好的模型。原冻结监督器本来会自动执行 1,056 条开发集评估，但完整测试受开发门槛限制。新增独立后台队列 `results/experience_coop_posteval/20260926_final_auto/`（代码 `ttcl/experience_coop/posteval.py`），不修改运行中原计划、源码、训练、种子或评分：
+
+- 等待 writer-only 与 dual 的全部 16 批结束，核验最终 writer、dual writer、dual reader 三个 adapter 文件，且 latest_checkpoints 必须指向固定 block_015；不依据训练或开发分数挑 checkpoint。
+- 原监督器自动做开发评估；若它继续完成完整测试，队列直接引用通过完整性检查的原结果，不重复计算。
+- 若原监督器正常结束但因开发门槛未通过而跳过测试，队列自动获取原 GPU 的协调锁，等待显存释放，再执行预先固定的完整测试。保留开发门槛失败记录，结果标为“用户要求的最终模型诊断”，不能解释为已通过开发门槛。
+- 完整测试为 ALFWorld 全部 134 个 valid_unseen 场景及四个 CLBench 领域的 200 个后缀题，3 种子、8 组，共 8,016 条组别记录。与现有 PPO 评测一致：每题一次执行、ALF 最多 50 步；经验在线更新，模型参数冻结；排除每条链首题的既有汇总口径不变。测试不再用于调参。
+- 训练或原评测发生基础设施错误时，队列记录失败，不把不完整 checkpoint 当作训练完成，也不伪造测试成绩。首次队列启动将未生成的批次状态文件当成错误，其日志保留在 `20260926_final/`；修复“未生成即等待”后启用上述 `_auto` 队列，原训练未受影响。七项测试覆盖等待、失败、不重复测试、未通过开发门槛仍测试，以及等待原完整性校验等分支。
+
+```bash
+python -m ttcl.experience_coop.posteval prepare \
+  --origin results/experience_coop/20260925_ppo8_corrected \
+  --root results/experience_coop_posteval/20260926_final_auto
+python -m ttcl.experience_coop.posteval launch \
+  --root results/experience_coop_posteval/20260926_final_auto
+python -m ttcl.experience_coop.posteval status \
+  --root results/experience_coop_posteval/20260926_final_auto
+```
+
+训练成功率并非最终模型的测试成功率：训练统计混合了不同批次的策略，writer 在温度 1 下采样 8 个候选，执行器也使用温度 1；评测采用固定最终权重，writer 贪心生成一条经验，执行器温度 0.7。题目分布和经验累积过程也不同，因此两者不能直接互推，更不能预先保证测试一定更高。
+
+#### 训练完成后评测快照：2026-09-27 06:44 UTC
+
+PPO-8 单 writer 与协作双 LoRA 两个分支均完成 16/16 批，开发评测 1,056/1,056 条完成，两个分支均未通过原定多域开发门槛。按追加要求，固定最终 checkpoint 的完整测试仍自动启动；目录 `results/experience_coop_posteval/20260926_final_auto/`，本次已完成 2,648/8,016 条（33.0%）。这是真实训练后独立评测，不是 PPO rollout reward。
+
+ALFWorld 每题一次尝试、最多 50 步，下表均排除各链首题；开发列为共同 84 个任务—种子配对，测试列为当前共同 304 个配对（125 个不同任务，尚非完整均衡样本）。
+
+| 组别 | 开发成功率 | 当前测试成功率 |
+|---|---:|---:|
+| 无经验 | 25/84 = 29.76% | 59/304 = 19.41% |
+| 未训练生成器 | 26/84 = 30.95% | 76/304 = 25.00% |
+| 旧 Delta | 25/84 = 29.76% | 78/304 = 25.66% |
+| PPO-8 单独训练 writer | 21/84 = 25.00% | 66/304 = 21.71% |
+| 协作训练 writer + 底座 | 33/84 = 39.29% | 65/304 = 21.38% |
+| 旧 Delta writer + 新 reader | 12/84 = 14.29% | 76/304 = 25.00% |
+| 协作 writer + reader | 17/84 = 20.24% | 46/304 = 15.13% |
+| 新 reader、不提供经验文本 | 24/84 = 28.57% | 59/304 = 19.41% |
+
+开发集的协作 writer 单独使用较好，但目前测试未超过旧 Delta；完整双 LoRA 更低，不能宣称新算法已提升。各组记忆轨迹不同，此表也不能单独证明 reader 导致全部下降。CL 开发集频谱、数据库持平；扑克协作 writer + 底座均值 7.5，旧 Delta 为 5.3571，完整双 LoRA 为 3.8929，但仅 14 个配对。数据库与队列各只有 2 个配对，不足以作稳健领域判断。完整 CL 测试刚到频谱阶段，当前 9 个共同反馈后配对均值均为 0.216667，其他领域待运行。原始快照为上述测试目录的 `partial_snapshot_20260927.json`；测试结果不用于本轮选 checkpoint 或继续调参。
+
+### 2.7 官方 Delta-Mem：CLBench 六领域与 ALFWorld 转移评测（2026-09-26）
+
+独立代码 `ttcl/deltamem_comparison/`，正式目录 `results/deltamem_comparison/20260926/`；旧 Delta、PPO-8 和既有冻结结果不改动。这是官方已训练记忆模块的迁移测试，不训练新的 writer 或 reader，也不把旧 Delta LoRA 当作 Delta-Mem。
+
+- **权重**：共享 Qwen3-4B-Instruct-2507 底座，加 [官方 TSW adapter](https://huggingface.co/declare-lab/delta-mem_qwen3_4b-instruct)，固定 revision `c46dc31155608e412d44bf56638d5a6f856f2e7e`。官方说明的训练来源是 Qasper，rank 8、Q/O heads；本轮所有参数冻结，只在线更新内部状态。权重文件和实际源码均做哈希冻结。
+- **三组**：`base` 完全绕过 Delta-Mem 模块；`deltamem_reset` 每道新题重置内部状态、同题重试间保留；`deltamem_online` 在同一领域和种子内保留，ALF 另按任务家族分链。每次尝试都清空文本历史和 KV 缓存，只携带状态张量。预检确认 36 个模块总状态为 4,608 字节，base 为 0。当前题内保留常规对话，修正 JSON 包装等造成前缀变化时从该次尝试的初始状态重建，避免重复写入或丢失更早题目的记忆。
+- **CLBench**：频谱 72、扑克 96、数据库 16、队列 16，严格沿用旧 Reflexion/ExpeL 的后 80% 测试题和种子 303/404。新增销售预测默认日程全部 12 题、代码适配默认日程全部 19 题；两者不使用训练前缀。共 231 个不同题 × 2 种子 × 3 组 = **1,386 条组别记录**。每题最多三次环境重置，首次官方成功即停止，否则记最后一次；同时单列第一次 reward。每次动作输出 4,096 token、温度 0.7、top-p 0.9，最多两次格式修复和 64 轮保护上限；保留官方工具和评分预算。
+- **ALFWorld**：沿用旧正式对照的全部 134 个 valid_unseen 场景 × 3 种子（92601/92602/92603）× 3 组 = **1,206 条组别记录**。沿用相同家族内顺序、每次 50 步、每题最多三次、首成功停止；动作输出 64 token、温度 0.7、top-p 1。保存旧训练排除审计并重新检查场景字节哈希。所有这些场景已经参与旧评测，不能称为研究者未见过的新测试集。预检只使用官方 train 场景和 CL 训练前缀。
+- **公平性边界**：新三组共享 HF/FlashAttention 推理后端，上下文上限 65,536，不静默截断，不选最好 reward。旧结果使用 vLLM，汇总会按题目—种子匹配，但跨后端比较仅作描述；主要结论来自新同后端 base。旧 CL Delta 已见前缀且每题一次，旧 Reflexion 为三次，ExpeL 为一次；各自预算和记忆轨迹会明确区分。CL 只写入官方公开反馈，不额外注入隐藏频谱分数、队列 population 分数或未来销售真实值；这与旧增强 scalar 反馈协议也有差别。
+- **执行与失败**：计划合计 **2,592 条组别记录**，最多 7,776 次环境尝试。逐次保存请求、公开轨迹、输入输出 token、状态前后哈希和错误。格式失败无官方得分时保留缺失，不补零；基础设施错误停止相应 worker，未完成目录保留后再恢复。销售与代码适配需要官方 Docker 环境；当前账户缺 Docker socket 权限，这 186 条记录明确待运行，不能算六领域已完成。
+
+实际主线环境仍为 Python 3.12。官方 Delta-Mem 推理使用独立环境（本机已验证 Python 3.10.20），版本见 `config/environments/requirements-deltamem-comparison.txt`；通过 localhost JSON 接口连接，避免替换正在运行的 PPO 依赖。服务设置单进程 60% 显存上限。默认启动 GPU 0/6，可用 `--cl-gpu`、`--alf-gpu` 覆盖；启动前应检查资源。本轮启动时 GPU 1/6 已被其他任务使用，实际两个独立服务均在 GPU 0，端口 18307/18308，不停止其他任务。
+
+在 4.1/4.2 的公开底座和数据准备基础上，额外下载 adapter 到 `models/delta_mem/delta-mem_qwen3_4b-instruct/`（原机尚未搬迁的旧路径仍有效）：
+
+```bash
+hf download declare-lab/delta-mem_qwen3_4b-instruct \
+  --revision c46dc31155608e412d44bf56638d5a6f856f2e7e \
+  --local-dir models/delta_mem/delta-mem_qwen3_4b-instruct
+python -m pip install --no-deps --target ttcl/.runtime/deltamem_benchmark_deps \
+  -r config/environments/requirements-deltamem-benchmark-extra.txt
+# 设置为独立、兼容官方 Delta-Mem 的 Python，不改动训练环境。
+export TTCL_DELTA_PYTHON=/path/to/delta-env/bin/python
+python -m ttcl.deltamem_comparison.run prepare
+python -m ttcl.deltamem_comparison.run launch --cl-gpu 0 --alf-gpu 6
+python -m ttcl.deltamem_comparison.run status
+```
+
+这份严格配对 `prepare` 依赖原正式 ALFWorld/CL 对照的 `plan.json` 和训练排除清单；它们属于忽略的结果资产，新服务器须按第 4 节依赖顺序先重新生成，不能凭空补造旧结果。推理环境需匹配 CUDA 和 FlashAttention；安装版本表不等于已验证任意新服务器。
+
+2026-09-26 运行恢复记录：频谱完成后，扑克 canonical index 26 的牌局在模型调用前结束（官方 reward +0.5、actor_calls=0）。旧新实验封装强制读取不存在的 responses.jsonl，因此 CL worker 中断；ALF worker 和 PPO 未受影响。修复只允许已完成的零调用牌局缺少动作日志，仍拒绝执行过模型却缺日志的情况；没有公开输入时允许保存空状态，跨题已有状态保持不变，不补造观察或评分。恢复源码独立保存在 `recoveries/zero_action_20260926/source/`，原 `source/` 与 `input_hashes.json` 完整保留；恢复前对 1,310 次已完成尝试的全部文件做哈希绑定。失败的未提交尝试按原规则留档后重新执行，已完成尝试直接恢复。恢复日志位于该恢复目录的 `worker.log`、`server.log`、`supervisor.log`。回归测试涵盖合法零调用与异常缺日志两种情况。
+
+2026-09-27 运行恢复记录：频谱与扑克已完成，数据库因两个服务共享 GPU 0 导致显存不足而中断，基础设施失败不计零分。为保持推理计算完全一致，恢复目录 `recoveries/gpu_wait_20260927/` 使用原模型计算和 60% 显存上限，只新增启动等待：每 30 秒检查 GPU 0，已用显存不高于 1,500 MiB 才启动 CL 服务并续跑。ALFWorld 服务继续运行，既有完成尝试和原冻结源码均经哈希保留。尝试过仅计算末 token logits 的显存优化预检，但 BF16 合成隐藏状态投影与全序列投影不逐位一致（最大差 0.015625），因此没有用于正式评测；预检只使用合成向量，不使用测试任务。等待状态在 `clbench_supervisor_status.json`，原 OOM 记录保存在恢复目录的 previous 文件；排队不等于已经恢复计算。
+
+实时查看 `workers/*.json`、`*_worker.log`；`status` 生成 `summary.json`（新三组共同配对）及 `historical_comparison.json`（与旧 Delta/Reflexion/ExpeL 的对应题目描述性比较）。所有权重、数据、在线状态和结果继续忽略，不上传 Git。2026-09-29 已核对 ALFWorld 完成、四个 CL 领域结束、另两个领域受阻；最新分数见第 0 节，较早 summary 文件不能替代最终逐题记录。
+
+### 2.8 Qwen3-4B：完整历史 ICL 与官方 Mem0（2026-09-27）
+
+用户要求把 ICL 与 Mem0 在此前讨论的四个 CLBench 领域完整运行。新实验代码在 `ttcl/icl_mem0_comparison/`，结果目录为 `results/icl_mem0_comparison/20260927/`，独立于旧 Delta、Reflexion、ExpeL、PPO-8 和官方 Delta-Mem。正式结果以该目录实时状态为准。
+
+任务预检确认默认完整序列为：频谱 90、扑克 120、数据库 multi_group 30、队列研究 20，共 **260 个任务**。此前数据库只评测了前 20 题；本轮补齐默认 30 题。任务环境 seed 固定为 42，生成种子为 303、404；无经验、完整历史 ICL、Mem0 三个条件合计 **1,560 条任务—种子—方法记录**。每题只运行一次，保留官方环境预算，最多 2 次 JSON 格式修复；格式修复不额外执行环境动作。64 个动作的保护上限触发时保留失败，不补造评分。
+
+三组共享 `Qwen/Qwen3-4B-Instruct-2507` 原始底座，无训练、无 LoRA，actor temperature=0.7、top_p=0.9、max_tokens=4096，按相同 task ID、turn 与 repeat 派生采样种子。模型输入仅含公开题目、动作 schema、回答和环境公开反馈；评估器的隐藏信息及外部 scalar reward 不写入历史或记忆。
+
+- **无经验**：保留当前题交互，每个新任务清空历史。
+- **完整历史 ICL**：按顺序保留当前领域、种子链中的全部公开交互，包含原始模型输出、格式修复和终局公开反馈。不做摘要、筛选或 FIFO 截断；超出上下文时明确记录失败。
+- **Mem0**：使用官方 `mem0ai==2.0.0` 的提取、存储与检索流程。每次公开反馈后调用 `Memory.add`，每个动作前检索 top_k=10；提取器同为本地 Qwen3-4B，temperature=0、max_tokens=4096。使用独立本地 Qdrant，开启 SDK 自带的 dense / BM25 / entity 功能，词形还原与实体提取采用 spaCy `en_core_web_sm==3.8.0`。SDK 捕获的警告和更新失败另行留档。该版本的原生实现使用 additive extraction；复现时必须保留 SDK 版本。
+
+embedding 为 [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3)，固定 revision `5617a9f61b028005a4858fdac845db406aefb181`，存于 `models/embedding/bge-m3/`，CPU 运行。原生 embedding 输入上限为 8192 token，发生截断时记录在 `embedding_calls.jsonl`；它不改变 ICL 的完整历史输入。BM25 资源固定 `Qdrant/bm25` revision `22b8d2af71a76161e18dd432d2cee0eefa66e412`，位于 `models/embedding/fastembed/`；spaCy 模型包位于 `models/nlp/`。推理、提取和检索都在本地完成，不依赖付费 API。
+
+长历史服务使用 vLLM 0.9.1、BF16 模型权重、262144 context、FP8 E5M2 KV cache（动态尺度）、GPU memory utilization=0.80、max_num_seqs=2。监督器先执行固定合成文本预热，再启动四个领域 worker；每个 worker 按题交错运行三个条件，第二个种子排队续跑。此前预检发现 A100 不支持默认 FP8 E4M3 的相应 Triton 路径，因此在正式冻结前选择 E5M2 并通过生成验证。三组共享同一后端；评判收益以本轮重跑的无经验组为基线。预检内容、失败日志和合成 Mem0 检索记录保存在 `20260927_preflight/`。
+
+`plan.json`、冻结源码、原始数据及模型文件均绑定 SHA-256；`worker_packages.json` 和 `server_packages.txt` 保存环境版本。`summary.json` 同时给出全序列、排除首题、后 80% 以及旧 Delta / Reflexion / ExpeL 任务范围的共同样本结果和 token 成本。缺失分数不补零；旧实验的后端、外部 reward 可见性或尝试预算不同，跨轮比较按描述性结果解释。正式长任务未完成前不把局部均值表述为最终效果。
+
+复现命令见 4.4.4。所有模型、向量库、历史、日志与结果均在 ignore 范围内。
+
+### 2.9 SDPO：推理期间持续更新参数经验（2026-09-27）
+
+用户目标是参数经验在执行期间根据新轨迹与 reward 持续更新。选择 [SDPO / Reinforcement Learning via Self-Distillation](https://arxiv.org/abs/2601.20802)，官方代码为 [lasgroup/SDPO](https://github.com/lasgroup/SDPO)，固定 commit `7c457fc1b1f636ae794eb0362ba37d4743b06fbc`。选取的未修改源码与 Apache-2.0 LICENSE 位于 `current_work/SDPO_reference/`，来源登记在 `config/upstreams.json`。运行器从官方源码提取并原样调用 `compute_self_distillation_loss` 和 `agg_loss`，仅提供本地 masked-sum 工具；没有用普通 SFT 或自写标量 PPO 冒充 SDPO。
+
+选择依据：SDPO 明确利用环境反馈做参数更新，原文同时报告了推理期间的适应实验；官方代码具有公开实现与一定社区关注。它不等于已被证明适合本项目的 Qwen3-4B/CLBench。相关候选包括 [SEAL](https://github.com/Continual-Intelligence/SEAL)（生成自编辑材料再适应，仓库已有 BSM 迁移）、[SDFT](https://self-distillation.github.io/SDFT)（示范条件下自蒸馏，原文提示小模型的 ICL 教师可能较弱）、[SDAR](https://github.com/ZJU-REAL/SDAR)（RL 加门控自蒸馏，原生主要是离线训练 agent）。本次选择 SDPO 的公开反馈适应路径，不引入外部付费 API 或教师模型。
+
+**这是 SDPO 核心算法向 CLBench 的在线 LoRA 迁移，不是原论文 benchmark 分数复现。** 主要迁移差异：Qwen3-4B-Instruct-2507；全参数训练改为 rank 8、alpha 16、attention+MLP LoRA；每题仅一次正式尝试；跨题保留参数而非按 coding question 重置；连续 reward 作为 teacher 上下文，不能把正值武断地视为正确解；没有同题成功 sibling rollout。保留官方默认 top-100 加尾部桶、JSD alpha=0.5、EMA teacher update rate=0.05；LoRA 学习率预先固定 1e-5。单设备 PyTorch 取代分布式 veRL，不重新生成伪正确答案。
+
+运行流程：当前模型作答 → 官方环境计分并写入 row → 用该题实际生成 token、公开工具/格式反馈及该题终局标量构造 teacher → 执行一次梯度更新 → EMA 更新 teacher → 下一题使用新参数。两个随机选取的生成动作参与更新，选择与奖励和长度无关；选中动作的 student/teacher 长度超 24576 时记录排除，不换成短或成功动作。teacher 公共反馈文本最多 12000 字符，保留头尾并记录省略量。生成不静默截断，context=65536、temperature=1、top_p=1、max_new_tokens=4096；单题最多 64 个动作、两次 JSON 包装修复。最终一题只计分。
+
+底座参数冻结；student、EMA teacher 和 Adam 状态在一个领域/种子的任务链中持续保存，换领域或种子时重置。原有 Delta/PPO 检查点均不加载，没有把全量测试数据预先用于离线训练。训练监督是新反馈条件下自动生成且绑定实际消息、token 和反馈摘要的概率目标，不复用历史标注。teacher 不接收评分明细、隐藏答案、环境内部状态或未来题目。reward 进入 teacher 上下文，没有另加标量 policy-gradient 损失。
+
+| 项目 | 预先固定的设定 |
+|---|---|
+| 实现 | `ttcl/sdpo_clbench/` |
+| 组别 | `frozen`；`sdpo_online`，共享底座、提示、环境与采样预算 |
+| 任务 | 频谱 90、扑克 120、数据库 30、队列研究 20，共 260 |
+| 种子 | 303、404；共 1040 条组别记录 |
+| 评分 | 所有题目从第一题起计分；额外报告排除首题的共同配对均值与失败数 |
+| 反馈协议 | 公开 observation 加任务完成后的官方标量；这是显式标量增强协议，不能与无标量反馈的 ICL/Mem0 直接作严格排名 |
+| 参数与成本 | 每题一小步，均匀抽两个动作；记录参数哈希、梯度、loss、teacher 差异、更新耗时和 actor tokens |
+| 资产 | 底座优先 `models/delta_mem/`，旧机兼容 `current_work/delta-Mem/model/`；新增权重在 `models/sdpo_clbench/<run>/`，结果在 `results/sdpo_clbench/<run>/`，均忽略上传 |
+| 六领域边界 | 此轮覆盖上述四个领域；sales_prediction/codebase_adaptation 仍依赖尚未解决的 Docker 环境，不宣称全六领域完成 |
+
+复现：先完成第 4.1/4.2 的 Python 3.12 主线环境、structured-memory 依赖及公开 base、clbench-data、clbench-db。核心版本另列 `config/environments/requirements-sdpo-clbench.txt`，不安装替换现有 veRL/vLLM 环境。每次使用全新运行目录：
+
+```bash
+export TTCL_WORKSPACE="$PWD"
+export TTCL_PYTHON="$PWD/ttcl/.runtime/alf_delta_env/bin/python"
+"$TTCL_PYTHON" -m unittest ttcl.sdpo_clbench.test_protocol ttcl.sdpo_clbench.test_learning -v
+CUDA_VISIBLE_DEVICES=0 "$TTCL_PYTHON" -m ttcl.sdpo_clbench.run smoke --root results/sdpo_clbench/new_smoke
+"$TTCL_PYTHON" -m ttcl.sdpo_clbench.run prepare --root results/sdpo_clbench/new_run --gpu 0
+"$TTCL_PYTHON" -m ttcl.sdpo_clbench.run launch --root results/sdpo_clbench/new_run
+"$TTCL_PYTHON" -m ttcl.sdpo_clbench.run status --root results/sdpo_clbench/new_run
+```
+
+`prepare` 冻结代码、官方 loss、计划、依赖版本、模型和任务文件哈希；worker 从冻结源码执行。新轨迹与训练目标另存绑定记录。监督器顺序运行 8 个领域/种子任务链，后台日志位于 `supervisor.log` 和 `logs/`；检查 `runs/<domain>/<seed>/status.json` 可区分作答与参数更新阶段。模型格式失败保留，缺失官方评分不填零；基础设施失败保留现场并单独标记。不得修改已冻结计划或用更新后的重答替换旧分数。
+
+当前验证：6 项单元检查通过，覆盖官方损失数值/梯度、LoRA 更新、底座和 teacher 梯度冻结、反馈隔离和新输入绑定。真实 Qwen3-4B 合成更新检查已通过（`results/sdpo_clbench/preflight_20260927_a/audit.json`）：student 与 EMA teacher 权重确实变化，底座完整参数哈希保持不变；合成样本 loss=0.04754，仅用于验证实现，不是 CLBench 成绩。正式目录为 `results/sdpo_clbench/20260927_online_lora/`，使用 GPU 2，监督器 PID 1447846。启动核验已完成 11/1040 条记录、5 次真实参数更新，并确认后续题使用更新后的 LoRA；核验时首批频谱配对分数持平，不能据此判断最终收益。实时阶段见 `status.json` 与 `summary.json`，核验详情见 `launch_validation.json`。尚无完整 CLBench 结果。
+
+### 2.10 APEx：官方代码下载与复现准备（2026-09-27）
+
+用户指定论文 [APEx: Distillation of Agent Procedural Experience for Adaptive Deep Research Question Answering](https://arxiv.org/abs/2609.02253v1)。完整官方源码来自 [J-Ding519/APEx](https://github.com/J-Ding519/APEx)，固定 commit `dfa88ea893950f77712fa7bcd50ff3785d37a4d8`，1,739 个文件、18,817,806 bytes，位于 `current_work/APEx/`。源码原样保存，仅排除嵌套 `.git`；该版本没有独立 LICENSE 文件，已有版权头保留，来源登记在 `config/upstreams.json`。PDF 存于 ignored 的 `data/apex/paper/2609.02253v1.pdf`，核验记录在 `results/apex_clbench/20260927_preparation/`。
+
+**截至本次准备，APEx 训练和 CLBench 评测均未启动，没有 APEx 实验成绩。** `config/apex-reproduction.json` 是依赖清单及协议草案，不是已运行计划；`scripts/apex_preflight.py` 仅作只读清点，不启动或预留 GPU。此前各实验继续使用原目录。
+
+原理：Executor 执行任务，Distiller/Writer 将轨迹整理成实例记忆及分类技能，Planner 检索两者后规划。离线分三阶段分别以 GRPO 训练 Executor、Writer、Planner；在线冻结 Executor/Writer 参数，继续演化经验文本，并用 GRPO 更新 Planner。在线奖励由多个裁判判断推理一致性、证据支持、回答完整性，再加技能对齐项；因此“无标准答案”仍依赖裁判反馈。它与本项目的区别是参数更新目标为 Planner；原版不是外挂 reader LoRA，配置默认 `lora_rank: 0`。Writer 的训练奖励来自技能质量、格式和操作合理性判定，不等同于旧 Delta 的后续任务配对收益。论文原始评测是七个问答基准，未报告 CLBench。
+
+| 模块 / 数据 | 原版要求 | 本地位置或状态 |
+|---|---|---|
+| Executor 底座 | `Qwen/Qwen2.5-VL-7B-Instruct` | `models/apex/base/Qwen2.5-VL-7B-Instruct/`，尚未下载 |
+| Writer、Planner 底座 | `Qwen/Qwen3-8B`，分别训练 | `models/apex/base/Qwen3-8B/`，尚未下载 |
+| 裁判 | `Qwen/Qwen3-32B` | `models/apex/base/Qwen3-32B/`，尚未下载 |
+| 检索模型 | `intfloat/e5-base-v2`、`princeton-nlp/sup-simcse-bert-base-uncased` | `models/apex/base/`；固定 revision 见配置 |
+| 公共训练依赖 | `LightningCreeper/MIA` revision `7a8c6aff9b8b026de3cfeb148aa68a35ac21cd69` | `data/apex/MIA/`；2 个 Executor train/val parquet、1 个 Planner parquet、FVQA 图像缓存，共 2,972,366,780 bytes，下载中 |
+| Writer 训练数据及技能库 | 用新 Executor 训练轨迹重新生成 | `data/apex/writer/`，尚未生成，不复用旧 CLBench 标注 |
+| wiki25 语料与 FAISS 索引 | 按官方 Search-R1 流程准备 | `data/apex/wiki25/`、`data/apex/faiss/`，尚未准备 |
+| APEx 三个最终模型 | 必须有可核验的 APEx 训练来源 | 预留 `models/apex/trained/{executor,writer,planner}/`，均无现成权重 |
+
+公开权重核验：官方 README 的 checkpoint 是本地占位路径，GitHub 没有 Release；检索到的 [LightningCreeper/MIA 模型](https://huggingface.co/LightningCreeper/MIA) 明确属于前作 MIA（arXiv:2604.04503），含 Executor/Planner，但没有 APEx Writer，不能冒充已训练的 APEx。当前未找到完整 APEx 权重；这是截至检查时的可检索状态，不断言作者没有任何其他未链接发布。
+
+运行前必须解决的具体问题：官方训练/在线脚本按 8 卡布局配置，15:10 UTC 本机只有 GPU 1、3 低于 1,500 MiB 使用量；三个主要底座仅 safetensors 就约 98.49 GB，另需训练 checkpoint、优化器、语料及索引。官方 Python 3.10.12 环境应单独建立，不能替换主线 3.12；本次尚未安装或验证该环境。后续需要根据资源调整分布式布局并验证训练等价性，不能把“空闲卡不足官方布局”误称算法必然无法少卡运行。
+
+代码核验发现：`TTRL/TTRL-nogt/run_ttrl_nogt_fvqa_skill.sh` 默认 `SKILL_REWARD_SOURCE=auto`，`local_search/mmsearch_skill.py::select_reward_accuracy` 在标准答案可用时优先使用 GT 分数；即使设为 `nogt`，其他分支仍可能接收 GT。CLBench 适配必须同时显式设置 `nogt` 并在调用边界剥离隐藏答案、评估器详情及未来信息，测试分数只由独立官方评估器保存。该发现针对当前公开代码默认值，不据此断言论文实验用了 GT。官方 launcher 还含广域 `pkill -9 -f "vllm serve"` 等清理；后续封装须只管理自身进程，不能直接运行这些脚本干扰既有实验。
+
+CLBench 迁移待实现：连接各环境原生动作 schema 和公开工具反馈；比较同模型/同预算的无经验、仅文本记忆、文本记忆加在线 Planner 更新。第一题起计分，更新前首次作答与更新后重试成绩分开，所有 rollout 和裁判成本留档；不同领域、种子重置参数和记忆。原版 7B/8B/32B 组合与旧 Qwen4B 各组只能作描述性比较。六领域中的 sales/code 还需 Docker 预检。训练样本使用上述外部训练分割，CLBench 不回流离线训练或权重挑选。完整预算及源文件哈希须在真实启动前冻结。
+
+新服务器完成第 4 节准备后可执行：
+
+```bash
+python3 scripts/fetch_assets.py apex-data
+# 原版模型共约 100 GB；以下仅下载底座，不产生训练好的 APEx。
+python3 scripts/fetch_assets.py apex-models
+python3 scripts/apex_preflight.py --verify-data \
+  --output results/apex_clbench/preparation/preflight.json
+```
+
+预检当前返回退出码 2，明确表示尚未就绪；不是训练失败。下载器按固定 revision 和公开 LFS SHA-256 校验数据，全部资产受现有 ignore 规则保护。无 APEx 训练进程或自动评测队列被创建。
+
+### 2.11 APEx 在现有 Qwen4B 上的全参数实验（2026-09-27）
+
+本节是用户随后指定“在现在的 Qwen4B 上按论文训练、不使用 LoRA”的新方案；2.10 保留的是此前原版模型准备记录，不能用其“未启动”描述判断本轮状态。代码独立放在 `ttcl/apex_qwen4b/`，参数在 `config/apex-qwen4b.json`，公共资源及 revision 在 `config/apex-qwen4b-assets.json`。原有 Delta、PPO-8、SDPO 和记忆基线目录均未覆盖。
+
+**2026-09-29 更新：该运行已在训练阶段失败，错误为 `On-policy probability mismatch: 0.191162109375`，没有完整 APEx CLBench 结果。** 目录为 `results/apex_qwen4b/20260927_fullparam_v2/`。此前裁判及检索资源下载完成，Qwen3-32B 裁判通过合成推理检查，并进入 wiki25 索引和后续训练流程；这些准备完成不等于训练成功。状态以 `supervisor_status.json`（整体阶段）、`status.json`（训练内部阶段）、`retrieval_progress.json` 和 `asset_progress.json` 为准。原定流程为资源就绪 → Executor 训练 → 重新采集训练轨迹 → Writer 训练与技能库构建 → Planner 训练 → 三组 CLBench 测试；必要服务或校验异常保留现场停止。
+
+三个角色均从同一份现有 `Qwen3-4B-Instruct-2507` 独立初始化，分别训练并保存完整权重。Qwen4B 不支持图像输入，所以 FVQA 图像替换为该公开数据自带的图片描述，工具使用文本检索。裁判保持 Qwen3-32B，检索使用 E5-base-v2 + 完整 wiki25，记忆相似度使用 sup-SimCSE-BERT。该实验是 **APEx 方法向 Qwen4B/CLBench 的迁移**，不等同于论文 7B/8B 多模态模型在七个原始问答基准上的完整复现。
+
+| 阶段 | query batch | 每题候选 | epoch | 学习率 | prompt / response token 上限 |
+|---|---:|---:|---:|---:|---:|
+| Executor | 128 | 8 | 8 | 1e-6 | 16384 / 16384 |
+| Writer / Distiller | 64 | 8 | 8 | 1e-6 | 4096 / 2048 |
+| Planner | 48 | 4 | 5 | 1e-6 | 24576 / 8192 |
+| CLBench 在线 Planner | 8 | 4 | 1 次有序遍历 | 2e-7 | 24576 / 8192 |
+
+上述批量、候选数、epoch、学习率及各模块 reward 权重按论文附录 C/D；使用官方 GRPO 组内优势和 clipped policy loss 函数，温度 1、top-p 1、clip 0.2、KL/entropy 系数 0、AdamW、grad clip 1，按官方默认 token-mean 聚合。为适应现有空闲硬件，改用单 GPU 采样/反向传播，CPU 保存 FP32 主权重和 Adam 状态，通过梯度累积保留完整批量；不是 LoRA，也不是 SFT。裁判为两卡 TP2、BF16 权重和 FP8 E5M2 KV cache，上下文按模型原生配置设为 40,960。原版多卡 veRL/FSDP 调度、图像工具及 CLBench 原生交互差异均已写入冻结配置，不能宣称与原运行逐 bit 等价。
+
+数据来自 `LightningCreeper/MIA` 固定 revision，原始文件 SHA-256 见 2.10 和配置。Executor 训练 4,856 条，独立保留 FVQA-test 1,800 条作为验证数据；Planner 原始 11,031 条，移除 16 条重复输入及两组冲突标签的全部 4 条记录后为 11,011 条。排除记录保存在 `data/apex_qwen4b/<run>/exclusions.json`，题目/描述和监督目标各自绑定 SHA-256。CLBench 没有进入离线训练、checkpoint 选择或这些标注。Writer 将从本次最终 Executor 重新生成的训练轨迹构造，每组通常 5–15 段历史，按输入绑定先分训练/验证再分组，保留上游对不足 5 条的小类别和尾部样本的处理；其最终训练样本数尚未产生。不会用旧 history ID 复用旧人工标签，也不使用数据中已有的外部模型计划作为新的 Qwen4B 训练轨迹。
+
+启动前已验证真实 Qwen4B 的 **4,022,468,096 个参数全部可训练且收到梯度**，FP32 主权重和多个层的 BF16 模型权重实际改变。短上下文检查峰值约 17.27 GiB；RMSNorm 小更新有 BF16 舍入现象，不据此误判为冻结。检查使用合成输入和人为奖励，只证明训练实现可更新，不能作为任务成功率。另已通过 32,014-token 输入的真实全参数更新，峰值显存约 28.30 GiB，全部参数收到梯度；这同样只是合成容量检查。关键单元/接口测试 8 项通过，覆盖官方 GRPO、Executor reward、跨文件检索记录、原生评测分数隔离、在线格式评分、剩余 token 预算、技能 skip/create 语义及非法 Writer 结构的零奖励留档。
+
+训练后固定评估三组：`base`（底座无跨题经验）、`apex_memory`（训练后的三角色 + 持续文本记忆，参数冻结）、`apex_ttrl`（同样文本记忆 + 在线全参数 Planner GRPO）。领域/种子/方法之间重置参数、优化器和记忆，每批 8 题的全部采样完成后才更新参数和经验。在线只接受公开问题/轨迹/动作/反馈，不接收官方分数、隐藏答案或 evaluator metadata；官方评估结果单独留档。原版 no-GT 多裁判及技能对齐用于学习奖励，不把裁判判断直接当 CLBench 成绩。
+
+计划覆盖频谱 90、扑克 120、数据库 30、队列研究 20、销售 12、代码 19，共 291 个不同任务，种子 303/404。每组每题 4 次独立环境 rollout，预先固定第 0 次为主评分，因此全计划为 1,746 条主记录、6,984 次环境 rollout；不是 6,984 个不同任务。第一题也计分，另外保留去掉首题的共同样本表。原生动作上限 64、每次输出 4096 tokens、最多两次格式重试；Planner 在仍未结束的第 9 个动作前可决定重规划，已终止任务不再重开补分。没有发生 decision 的短任务不凭空补一个 `no`，其 format reward 为 0。主结果不取四次中的最好值，全部采样和角色调用成本保留。与历史少 rollout 的基线不能当作完全同预算因果对照。
+
+当前 Docker socket 访问被拒绝，销售/代码领域的前置条件尚不满足。监督器在训练结束时重新检查；仍不可用则明确记为 blocked，不补零、不把四领域完成说成全部六领域完成。四个可用领域对应 1,560 条主记录、6,240 次环境 rollout。失败样本留档，共同完成样本作配对比较，同时报告失败数量；各领域 reward 不混为“平均准确率”。
+
+最终三个权重写入 `models/apex_qwen4b/<run>/{executor,writer,planner}/`，新数据写入 `data/apex_qwen4b/<run>/`，结果、逐批 loss/reward、压缩采样轨迹和裁判记录均在对应 `results/` 下。只保存固定最终模型，不按 CLBench 得分挑权重。当前 checkpoint 为推理权重，不含 Adam 状态，不能声称可从中无损续训。wiki25 精确 IndexFlatIP 放在主机内存，避免超大索引占满磁盘；检索进程退出后需要重建。源码、计划、基础权重和数据清单在启动前冻结，下载完成的裁判/检索模型还会单独绑定实际文件哈希。第一次冻结的 `20260927_fullparam` 预设裁判上下文 65,536，预检发现超过模型原生限制，在任何正式训练采样前停止；完整原清单及 `superseded_before_training.json` 保留。当前 v2 重新冻结源码/计划，复用原目录内通过校验的下载与 `data/apex_qwen4b/20260927_fullparam/` 数据，不改写旧冻结哈希。
+
+新服务器先完成第 4 节的 Qwen 底座和 CLBench 依赖准备，再使用独立 Python 3.12 环境及 `config/environments/requirements-apex-qwen4b.txt`。不需要下载原版的 7B/8B，也不需要旧 Delta/LoRA 权重：
+
+```bash
+export TTCL_WORKSPACE="$PWD"
+export TTCL_PYTHON="$PWD/ttcl/.runtime/apex_qwen4b_env/bin/python"
+# 环境中需安装上面的固定版本依赖，以及第 4 节的 CLBench 依赖。
+"$TTCL_PYTHON" scripts/fetch_assets.py base clbench-data clbench-db apex-qwen4b-data
+APEX_RUN="$PWD/results/apex_qwen4b/server2_fullparam_01"
+"$TTCL_PYTHON" -m ttcl.apex_qwen4b.run prepare --root "$APEX_RUN"   --gpu 2 --judge-gpus 1,3
+"$TTCL_PYTHON" -m ttcl.apex_qwen4b.run launch --root "$APEX_RUN"
+"$TTCL_PYTHON" -m ttcl.apex_qwen4b.run status --root "$APEX_RUN"
+```
+
+GPU 编号是本机例子，必须按新服务器空闲卡调整。`launch` 还会自动下载固定版本裁判、两个检索模型和 wiki25，并等待服务就绪后开始训练；需要公共资源网络访问。检查结果时先看整体阶段，只有 `collecting_training_rollouts` / `optimizing_full_parameters` 才进入正式训练，下载、索引和合成检查不能算训练步数。
+
 ## 3. 统一统计与解释约定
 
 - 以每轮明确的共同任务／种子交集计算配对差值；缺失分数不补零。
@@ -294,6 +687,7 @@ export PYTHONPATH="$PWD:$PWD/ttcl/.runtime/structured_memory_deps:$PWD/current_w
 
 以上主线采用 Python 3.12。旧 CLBench 通用 CLI 和部分 Delta-Mem 原生入口使用 Python 3.13，各自依赖在 `config/environments/`，不应混装到同一环境。需要与 PyTorch/vLLM 匹配的 NVIDIA 驱动。原机使用 A100 40GB；4.3 的初始 Delta 配方同时使用两张卡（actor 与训练器分开），4.4 的 PPO-8 监督器在一张卡上轮流采样和训练。显存需求会受上下文长度、并发和后端影响，未验证更小显存配置。完整版本表来自原环境，不代表目标服务器已经安装验证。若新服务器不能访问软件源/Hugging Face/GitHub，需要由可联网机器下载相应安装包和公开资源；只 clone 代码不会消除这些外部依赖。
 
+<a id="download-assets"></a>
 ### 4.2 下载权重与数据：公开地址、用途与目录
 
 先完成 4.1 的环境安装，再从仓库根目录下载。最新 PPO-8 最小公开依赖为 Qwen 底座、ALFWorld、CLBench 公开数据及两个 SQLite 数据库：
@@ -362,6 +756,93 @@ python scripts/fetch_upstream_dependency.py reef third_party/reef-client
 ```
 
 该脚本检出固定版本、复制源码并去掉临时 `.git`，不会在本仓库创建 gitlink。GenericAgent Desktop 2.0 的 dist 是上游唯一附带的桌面运行资产，并非本机缓存，连同第三方声明保留；ExpeL 的 `models/` 是 Python 源码，不能按名字误删。
+
+#### 4.2.1 按要复现的方法选择下载项
+
+“共同资源”指 Qwen3-4B-Instruct-2507、ALFWorld 文本任务（做 ALF 时）、CLBench `data/` 与两个 SQLite 数据库（做 CL 时）。只做四个 CL 领域无需下载 ALFWorld；但依赖历史 ALF 划分的严格配对入口仍需先生成对应计划。下表列的是本仓库实际实验的依赖，不是每篇论文所有原始 benchmark 的全集。
+
+| 方法 | 公开权重与附加资源 | 数据与生成依赖 |
+|---|---|---|
+| 无记忆 / 全历史 ICL / Reflexion | 共享 Qwen 底座 | 对应共同数据；无需额外预训练记忆模块 |
+| ExpeL | Qwen + `sentence-transformers/all-mpnet-base-v2` | ALFWorld / CLBench；经验库按本轮协议生成 |
+| 旧 Delta writer / PPO-8 writer-reader | Qwen；本地训练的旧 Delta LoRA、PPO 最终 LoRA | ALFWorld train 留出划分 + CLBench；先 4.3，再 4.4.1，旧 LoRA 没有随 Git 提供 |
+| 官方 Delta-Mem | Qwen + `declare-lab/delta-mem_qwen3_4b-instruct` | 同一批 ALFWorld / CLBench；严格配对入口依赖旧基线计划和训练排除清单 |
+| MemRL 本地适配 | Qwen + `BAAI/bge-m3` | ALFWorld / CLBench；输入校准及历史划分计划；在线从空记忆开始，不下载预训练记忆库 |
+| Mem0 本地对照 | Qwen + BGE-M3 + `Qdrant/bm25` + spaCy `en_core_web_sm` | CLBench 四领域及两个 SQLite 数据库；每轮生成独立向量库 |
+| SDPO online LoRA | Qwen；从本轮初始化并更新 LoRA | CLBench 四领域；无需专用预训练 SDPO checkpoint |
+| APEx Qwen4B 全参数迁移 | Qwen4B + Qwen3-32B 裁判 + E5 + SimCSE | MIA 的三个 train/validation parquet + wiki25 + 本地索引；后续才用 CLBench 评估 |
+| APEx 原版模型准备（可选） | 另加 Qwen2.5-VL-7B-Instruct、Qwen3-8B | MIA 图像检索缓存；不属于上面 Qwen4B 文本迁移的必需项 |
+
+#### 4.2.2 新增方法的固定资源清单
+
+以下公开仓库与列出的 revision 在 2026-09-29 核对；revision 与本地方案一致。共享 Qwen / ExpeL 下载器仍按 4.2 所述默认使用当前版本；严格重跑须保存所用 revision 和实际文件哈希，不能仅凭模型名称认定与原机相同。
+
+| 资源及公开地址 | 固定 revision / 版本 | 本地位置与用途 |
+|---|---|---|
+| [官方 Delta-Mem adapter](https://huggingface.co/declare-lab/delta-mem_qwen3_4b-instruct/tree/c46dc31155608e412d44bf56638d5a6f856f2e7e) | `c46dc31155608e412d44bf56638d5a6f856f2e7e` | `models/delta_mem/delta-mem_qwen3_4b-instruct/`；含 `delta_mem_adapter.pt`、`delta_mem_config.json` |
+| [BGE-M3](https://huggingface.co/BAAI/bge-m3/tree/5617a9f61b028005a4858fdac845db406aefb181) | `5617a9f61b028005a4858fdac845db406aefb181` | `models/embedding/bge-m3/`；MemRL / Mem0 共用，保留 `pytorch_model.bin`、tokenizer 与 SentencePiece 文件 |
+| [Qdrant BM25](https://huggingface.co/Qdrant/bm25/tree/22b8d2af71a76161e18dd432d2cee0eefa66e412) | `22b8d2af71a76161e18dd432d2cee0eefa66e412` | `models/embedding/fastembed/bm25/`；Mem0 稀疏检索资源 |
+| [spaCy 英文模型包](https://github.com/explosion/spacy-models/releases/tag/en_core_web_sm-3.8.0) | `en_core_web_sm==3.8.0` | `models/nlp/`；Mem0 实体／词形处理，由下载入口安装模型包 |
+| [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B/tree/9216db5781bf21249d130ec9da846c4624c16137) | `9216db5781bf21249d130ec9da846c4624c16137` | `models/apex/base/Qwen3-32B/`；APEx 裁判，权重约 65.52 GB |
+| [E5-base-v2](https://huggingface.co/intfloat/e5-base-v2/tree/f52bf8ec8c7124536f0efb74aca902b2995e5bcd) | `f52bf8ec8c7124536f0efb74aca902b2995e5bcd` | `models/apex/base/e5-base-v2/`；APEx 文本检索 |
+| [sup-SimCSE-BERT](https://huggingface.co/princeton-nlp/sup-simcse-bert-base-uncased/tree/2d82fab19ac3a73a20dd20333d27eb8a52d6e97f) | `2d82fab19ac3a73a20dd20333d27eb8a52d6e97f` | `models/apex/base/sup-simcse-bert-base-uncased/`；APEx 记忆相似度，需 `pytorch_model.bin` |
+| [MIA 公共数据](https://huggingface.co/datasets/LightningCreeper/MIA/tree/7a8c6aff9b8b026de3cfeb148aa68a35ac21cd69) | `7a8c6aff9b8b026de3cfeb148aa68a35ac21cd69` | `data/apex/MIA/`；Qwen4B 路线只需下列三个 parquet，约 2.374 GB |
+| [wiki25](https://huggingface.co/datasets/XLDDD/wiki25/tree/0c3b06eedd938f806207688c08949bd01fc0c9c0) | `0c3b06eedd938f806207688c08949bd01fc0c9c0` | `data/apex/wiki25/raw/`；23 个分片，24,180,631,522 bytes，另需索引、解压和 checkpoint 空间 |
+
+MIA 的三个必需文件为 `Train/Executor/fvqa_train.parquet`、`Train/Executor/fvqa_test.parquet`、`Train/Planner/fvqa_matpo_train_planner.parquet`；`fvqa_test` 仅作该外部数据的离线验证，不作为 CLBench 测试数据。原版可选图像缓存为 `image_search_cache/FVQA_Cache.zip`，Qwen4B 路线使用数据自带描述，不需要下载该缓存。文件大小和 SHA-256 分别固定在 [APEx 数据清单](config/apex-reproduction.json) 和 [Qwen4B 资源清单](config/apex-qwen4b-assets.json)。
+
+#### 4.2.3 按需下载命令与环境
+
+完成前面的共同资源下载后，仅运行所需方法的附加命令：
+
+```bash
+# 官方 Delta-Mem；不是本项目训练出来的旧 Delta writer LoRA。
+hf download declare-lab/delta-mem_qwen3_4b-instruct \
+  --revision c46dc31155608e412d44bf56638d5a6f856f2e7e \
+  --local-dir models/delta_mem/delta-mem_qwen3_4b-instruct
+
+# 仅跑 MemRL：下载固定 BGE-M3 及 tokenizer，避免下载无关 ONNX 导出。
+hf download BAAI/bge-m3 \
+  --revision 5617a9f61b028005a4858fdac845db406aefb181 \
+  --local-dir models/embedding/bge-m3 \
+  --include '*.json' 'pytorch_model.bin' 'sentencepiece.bpe.model' '*.txt' '1_Pooling/*' 'README.md'
+
+# 跑 Mem0：在 4.4.4 的独立环境中一次准备 BGE-M3、BM25 和 spaCy 模型。
+python -m ttcl.icl_mem0_comparison.run download-embedding
+
+# 仅在准备 APEx Qwen4B 路线时下载三个外部训练/验证 parquet。
+python scripts/fetch_assets.py apex-qwen4b-data
+```
+
+APEx 的裁判、检索器、wiki25 可单独下载，不启动 GPU 训练。以下 `results/apex_asset_download_new` 必须是未使用的新目录；目录已存在时先检查其用途，再选择另一个新名字：
+
+```bash
+python - <<'PY'
+from pathlib import Path
+import shutil
+target = Path('results/apex_asset_download_new')
+target.mkdir(parents=True, exist_ok=False)
+shutil.copy2('config/apex-qwen4b-assets.json', target/'asset_plan.json')
+PY
+python -m ttcl.apex_qwen4b.assets --root results/apex_asset_download_new
+```
+
+该入口按清单下载并校验 wiki25 分片，记录进度；构建检索索引、训练 Executor/Writer/Planner 是后续独立阶段。只有重建 2.10 的原版模型准备时才执行 `python scripts/fetch_assets.py apex-models` 与 `apex-data`，前者还会下载 Qwen2.5-VL-7B、Qwen3-8B。公开底座、MIA 前作 checkpoint 和本项目训练的 APEx 三角色权重不能混用；当前本地 APEx 训练失败，没有完整可评估的最终三角色模型。
+
+各运行器使用独立环境，依赖入口如下；安装命令与新运行示例分别见 2.7–2.11、4.4.4 和 [MemRL 说明](ttcl/memrl_comparison/README.md)。不要在正在运行的环境中升级依赖。
+
+| 路线 | 环境清单 | 额外运行条件 |
+|---|---|---|
+| 共享底座 / PPO-8 / ALF 基线 | `config/environments/requirements-alf_delta.txt`，Python 3.12 | CL 工具依赖另装到 `structured_memory_deps`，见 4.1 |
+| 官方 Delta-Mem | `requirements-deltamem-comparison.txt`，本机验证 Python 3.10.20 | FlashAttention 与 CUDA 匹配；CL 工具另用 `requirements-deltamem-benchmark-extra.txt` |
+| ICL / Mem0 | `requirements-icl-mem0.txt`，Python 3.12 | 固定 `mem0ai==2.0.0`；SDK 各检索资源齐全 |
+| MemRL 本地适配 | `requirements-memrl-comparison.txt`，Python 3.12 | 同主线环境；公开输入校准和历史划分计划必须存在 |
+| SDPO online LoRA | `requirements-sdpo-clbench.txt` | 在主线与 CL 依赖基础上安装；保留原 OOM 记录，尚未完成全域测试 |
+| APEx Qwen4B | `requirements-apex-qwen4b.txt`，Python 3.12 | 32B 裁判、完整检索语料/索引；保留概率校验失败记录 |
+
+上表未展开的环境文件均在 `config/environments/`。CLBench 的 Sales prediction / Codebase adaptation 还要求可用的 Docker daemon、相应官方环境和 `minisweagent`；应先执行 `docker info` 预检。当前原机的 Docker socket 权限失败是缺少那 186 条官方 Delta-Mem 记录的原因，不是下载数据后就已完成评测。
+
+**历史权重边界：** 旧 Delta、PPO-8 writer/reader 与在线 SDPO adapter 都是本地训练产物。需要精确恢复当前 checkpoint 时，要从原机单独迁移对应 ignored 权重与冻结计划；只 clone 此仓库不能恢复它们。重新训练可按本文依赖顺序建立新运行，结果应标成新谱系。官方 Delta-Mem / MemRL 的严格配对准备依赖旧实验 `plan.json` 和排除清单；准备新的公开数据不等于恢复这些历史文件，不应编造计划、轨迹或标签。
 
 ### 4.3 从零训练依赖顺序
 
@@ -454,6 +935,29 @@ python -m ttcl.experience_lab.run status --root "$LAB_RUN"
 
 代码为 `ttcl/alfworld_comparison/`，已完成结果和协议见 2.4。额外需要 `embedding` 下载项；三个方法共享 Qwen 底座，Reflexion 和 ExpeL 不需要下载另一个已训练生成模型。其原机入口默认要求 `experience_evolution`、`experience_v2`、`experience_repair`、`experience_design` 四个项目的历史任务清单，以复现完整污染审计。**它不是只完成最小 PPO 路线后就能直接运行的无依赖入口**；完整重跑先按 4.3、4.5 重建依赖，参数和原始命令见 2.4 及模块 `--help`。如果在新谱系下另建正式对照，须先明确调整、记录对应审计协议和硬件配置，不能冒充本文原机的 2010 条结果。
 
+#### 4.4.4 完整 ICL / Mem0 四领域对照
+
+先完成 4.1 的 Python 3.12 主线环境和 `structured_memory_deps`，按 4.2 下载 Qwen 底座、CLBench 数据与数据库。新 worker 使用独立环境，避免 Mem0 的依赖改动正在运行的训练：
+
+```bash
+python3.12 -m venv ttcl/.runtime/icl_mem0_env
+ttcl/.runtime/icl_mem0_env/bin/python -m pip install -r config/environments/requirements-icl-mem0.txt
+export TTCL_WORKSPACE="$PWD"
+export TTCL_PYTHON="$PWD/ttcl/.runtime/alf_delta_env/bin/python"
+export PYTHONPATH="$PWD:$PWD/models/nlp:$PWD/ttcl/.runtime/structured_memory_deps:$PWD/current_work/continual-learning-bench"
+ttcl/.runtime/icl_mem0_env/bin/python -m ttcl.icl_mem0_comparison.run download-embedding
+# --root 使用新目录；已冻结的实验禁止覆盖。GPU / port 按新服务器资源调整。
+ttcl/.runtime/icl_mem0_env/bin/python -m ttcl.icl_mem0_comparison.run prepare \
+  --root results/icl_mem0_comparison/new_run --gpu 0 --port 18327
+ttcl/.runtime/icl_mem0_env/bin/python -m ttcl.icl_mem0_comparison.run supervise \
+  --root results/icl_mem0_comparison/new_run
+# 长时间运行时将 supervise 放入 tmux，或用 nohup 重定向日志。
+ttcl/.runtime/icl_mem0_env/bin/python -m ttcl.icl_mem0_comparison.run status \
+  --root results/icl_mem0_comparison/new_run
+```
+
+`download-embedding` 固定下载 BGE-M3、BM25 与 spaCy 模型到 `models/`，不需要个人 API key。监督器默认用 `TTCL_PYTHON` 启动模型服务器，可在 prepare 时指定 `--server-python`。原机采用 A100 40GB，其他硬件须先验证 FP8 E5M2 和长上下文支持。worker 的代码和官方任务实现从结果目录内的冻结副本运行；已有 worker 目录不会自动覆写，遇到基础设施错误会保留失败现场。
+
 ### 4.5 新轨迹必须重新审核标注
 
 修复实验不依赖 `/tmp/experience_repair_histories.json`。`annotations.py` 只保留通用加载、内容绑定检查和经验构造逻辑，真实 32 条监督目标存放在 ignored 的 `data/annotations/experience_repair_reviewed.json`；可用 `TTCL_REPAIR_ANNOTATIONS` 指定另一份审核文件。
@@ -476,6 +980,8 @@ CUDA_VISIBLE_DEVICES='' python -m unittest ttcl.experience_coop.test_prepare \
 ```
 
 本次迁移检查：38 项路径、下载器、数据来源、奖励／校正及训练逻辑测试通过；临时只含 Git 文件的新目录成功建立兼容路径与 CLI，并在挂接只读本地资源、仅提供初始 Delta 谱系后完成 PPO-8 准备与冻结校验（160 段历史、16 批／分支、ALF train/dev/test 为 384/48/134 且场景互斥）。未在目标服务器实际安装环境或重新完成 GPU 训练；目标机器仍应按上述顺序检查。原机正在运行的校正版冻结文件也已复核未变。
+
+2026-09-29 发布校验：下载器与目录准备相关 14 项测试通过；官方 Delta-Mem、ICL/Mem0、MemRL、SDPO、APEx 与 PPO 后续评估的 36 项协议／逻辑测试通过，共 50 项。后者在禁用 GPU 的环境运行，未重新执行模型训练或正式评估；SDPO / APEx 的实际失败状态保持不变。检查了新增文档的本地引用、资源 manifest 与固定公开 revision，并按本节要求扫描 Git 索引。上传内容为结果说明、相关运行器、下载配置和带来源记录的上游源码；模型、任务数据、逐题结果及本机凭据继续保存在 ignored 路径。
 
 仅修改说明、代码和配方后正常 git add/commit/push。不要使用 `git add -f` 上传被忽略的资产或兼容链接，不需要 Git LFS。上游许可继续适用；移除旧 `.git` 不改变代码来源或许可证。
 
@@ -5658,3 +6164,55 @@ PYTHONPATH="$PWD/ttcl/.runtime/structured_memory_deps:$PWD/current_work/continua
 
 
 </details>
+
+## 2026-09-28：MemRL 同预算适配复现
+
+官方完整源码下载到 `current_work/MemRL`，固定提交
+`c1b322ca43de36ddf64c6712f89d0095bfc35ce0`；来源、归档 SHA-256 和 MIT
+许可证登记在 `config/upstreams.json`。上游数据移到 ignored 的
+`data/memrl/upstream_c1b322c`，不进入代码仓库。
+
+入口为 `ttcl.memrl_comparison.run`，详细协议和运行命令见
+[MemRL README](ttcl/memrl_comparison/README.md)。运行目录为
+`results/memrl_comparison/20260928_budgeted`。2026-09-29 已核对该轮结束：
+1844/1844 条记录、1841 可评分、3 失败；最新结果见第 0 节，
+`status.json`、`summary.json` / `REPORT.md` 保留逐轮状态与统计。
+监督器只启动、停止自己创建的子进程；新运行选用释放后的 GPU 1、端口 18527。
+
+- ALFWorld 逐文件复用 `alfworld_comparison/20260924_parserfix` 的 134 道
+  valid_unseen、三个种子和顺序；每题 50 步、最多三次。无记忆 / MemRL 共 804 个单元。
+- CLBench 使用此前四领域的 90/120/30/20 题、seed 42、重复种子 303/404，
+  共 1040 个单元；Docker CRM/codebase 未伪造结果。
+- 固定 Qwen3-4B，无权重训练。直接执行上游检索、Q 更新、脚本/反思的原始
+  AST；本地 JSON 存储和 BGE-M3 替换 MemOS/OpenAI 服务。完整轨迹保存，
+  actor 只接收 2048-token 内完整的任务＋脚本/反思条目。writer 到达 768-token
+  上限时按官方 provider 行为保留非空文本，并显式标记可能未完成的生成，不加预算重试。
+  该投影及共用 actor
+  提示与官方默认完整轨迹、few-shot/ReAct 流程不同。
+- 相似度统计使用 144 条历史 ALF train 公开输入及 CLBench 各领域前 20%
+  公开输入；未使用标签和后 80% 测试输入。CLBench 主指标为最后 80%，
+  全量/首题后指标另列。校准曾因扑克任务列表被 reset 原地缩短而失败；已改为
+  每个 canonical index 新建官方任务，并保留该次预检失败记录。
+- ALF 官方成功转为 +1/-1 更新 Q；CL 官方连续奖励直接更新 Q，不进入 writer
+  文本。官方 success 位用于选择脚本/反思分支，失败反思提示会告知本次失败；
+  不向 writer 提供评分器 metadata 或 ground truth。官方 success=null 时生成脚本且元数据仍为 null；CL 关闭不适用于无界
+  奖励的 ALF -10 Q 截断。MemRL 的数值反馈比此前 Mem0 更丰富，不应把旧分数
+  差异解释成纯算法因果效应。两臂重跑同后端无记忆基线。
+- 新源代码、模型、数据、校准结果和依赖版本已绑定哈希；新记忆绑定实际公开
+  输入和轨迹。缺失评分不补零；中断的半条轨迹不静默重跑。七项核心协议测试
+  通过；真实 ALF train / CL 校准前缀预检也已通过（实际 Q 更新为 0.3，
+  BGE 批处理与单条编码最大差值 6.52e-8）。监督器已启动正式任务链。
+
+早期准备目录 `20260928` 和 `20260928_v2` 已标记 superseded，正式样本均为 0。
+首次真实预检把 token 上限错误判为基础设施失败，其轨迹和 traceback 完整保留；
+新目录按官方行为修正，CL 原生 artifacts 也使用实际 arm 名称。
+
+这是现有预算下的在线方法对照，不是论文原版 3553 训练题 × 10 轮的成绩。
+运行未完成时不得把预检分数当作正式实验结果。Python 3.12 依赖入口为
+`config/environments/requirements-memrl-comparison.txt`，沿用已固定的主线环境，
+没有向运行中的环境安装或升级依赖。
+
+Mem0 机制分析脚本为 `ttcl.icl_mem0_comparison.analyze`，每次写入新的
+`results/mem0_analysis/` 快照，并保存逐题数据、案例、源文件哈希及脚本副本。
+主要对照为 Mem0 / none 两组共同有效且排除链首题；另列失败、种子、任务聚类
+区间、厚尾敏感性和 actor/writer 成本，避免全历史 ICL 的失败额外筛选样本。

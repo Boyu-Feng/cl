@@ -230,3 +230,6 @@ mykey.py
 /current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/summary.csv
 /current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/wandb_history.csv
 /current_work/reef/recipes/tttd/examples/tttd/results/formal-8x64-v3-packing/wandb_training_metrics.png
+
+# MemRL upstream datasets are local assets.
+/current_work/MemRL/data

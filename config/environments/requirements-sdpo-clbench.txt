@@ -1,0 +1,7 @@
+# Local single-device CLBench transfer. Does not install/replace the veRL stack.
+# Install mainline requirements-alf_delta.txt and structured-memory dependencies first.
+torch==2.7.0
+transformers==4.52.4
+peft==0.15.2
+accelerate==1.7.0
+safetensors==0.8.0

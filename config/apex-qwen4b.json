@@ -1,0 +1,108 @@
+{
+  "paper": "https://arxiv.org/abs/2609.02253v1",
+  "official_commit": "dfa88ea893950f77712fa7bcd50ff3785d37a4d8",
+  "method": "APEx transferred to Qwen3-4B-Instruct-2507 with full-parameter GRPO",
+  "lora": false,
+  "task_seed": 42,
+  "judge_context": 40960,
+  "executor": {
+    "batch_size": 128,
+    "group_size": 8,
+    "epochs": 8,
+    "learning_rate": 1e-06,
+    "max_prompt_tokens": 16384,
+    "max_response_tokens": 16384,
+    "context": 32768,
+    "max_tool_tokens": 4096,
+    "max_turns": 10
+  },
+  "writer": {
+    "batch_size": 64,
+    "group_size": 8,
+    "epochs": 8,
+    "learning_rate": 1e-06,
+    "max_prompt_tokens": 4096,
+    "max_response_tokens": 2048,
+    "context": 6144
+  },
+  "planner": {
+    "batch_size": 48,
+    "group_size": 4,
+    "epochs": 5,
+    "learning_rate": 1e-06,
+    "max_prompt_tokens": 24576,
+    "max_response_tokens": 8192,
+    "context": 32768,
+    "max_tool_tokens": 8192,
+    "max_turns": 10
+  },
+  "optimization": {
+    "algorithm": "official GRPO advantage and clipped policy loss",
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "clip": 0.2,
+    "kl_coefficient": 0.0,
+    "entropy_coefficient": 0.0,
+    "adam_betas": [
+      0.9,
+      0.999
+    ],
+    "adam_eps": 1e-08,
+    "weight_decay": 0.01,
+    "max_grad_norm": 1.0,
+    "ppo_epochs": 1,
+    "loss_reduction": "official token-mean default",
+    "all_parameters": true,
+    "optimizer_states": "FP32 CPU AdamW masters",
+    "weights": "BF16",
+    "gradient_accumulation": "full declared query batch including every sampled group",
+    "checkpoints": "Fixed final checkpoint for each stage; no test-based selection; inference checkpoints omit Adam state"
+  },
+  "clbench": {
+    "tasks": {
+      "blind_spectrum_monitoring": 90,
+      "exploitable_poker": 120,
+      "database_exploration": 30,
+      "cohort_studies": 20,
+      "sales_prediction": 12,
+      "codebase_adaptation": 19
+    },
+    "repeats": [
+      303,
+      404
+    ],
+    "arms": [
+      "base",
+      "apex_memory",
+      "apex_ttrl"
+    ],
+    "batch_size": 8,
+    "group_size": 4,
+    "learning_rate": 2e-07,
+    "max_turns": 64,
+    "action_retries": 2,
+    "max_action_tokens": 4096,
+    "actor_context": 32768,
+    "planner_response_budget": 8192,
+    "primary": "Predeclared candidate 0 before current batch updates; first task included",
+    "other_rollouts": "All four kept and charged to each method; no best-of-four scoring",
+    "reward_source": "Official no-GT judges and skill alignment, with no evaluator result accepted by learning boundary",
+    "updates": "Planner full parameters only; after entire 8-query batch; memory and skills updated after batch",
+    "reset": "All model parameters, optimizer and memories reset by domain, seed and arm",
+    "format": "Official yes/no and balanced-think format rule; native tasks ending before a decision receive zero format point",
+    "transfer": "CLBench native action schema; replan at turn 9 if active; no action after terminal outcome; all arms have identical environment/action budgets; planner/writer/judge costs separate",
+    "failure": "Keep unscored failures separately; never fill with zeros; compare scored common canonical pairs"
+  },
+  "adaptations": [
+    "All three policy roles initialized independently from the existing Qwen4B checkpoint, not the paper 7B/8B models",
+    "Official image captions replace image pixels; text search only",
+    "Single policy GPU with CPU FP32 AdamW masters and sequential role swaps replaces 8-GPU FSDP/veRL launch; original GRPO functions reused",
+    "Judge weights BF16 with FP8 E5M2 KV cache, TP2 on two A100 40GB devices",
+    "Writer history split is by bound input before grouping, not random overlapping groups; new trajectories and reward inputs fully bound",
+    "Exact normalized E5 IndexFlatIP wiki25 in RAM; no compressed retrieval index",
+    "Preserve final inference checkpoints and all compressed rollouts; no claim of optimizer-resumable checkpoint",
+    "Official Planner duplicate inputs deduplicated; all conflicting-reference input groups quarantined before training",
+    "CLBench native environments and first-attempt continual evaluation replace the paper QA test loop; not original seven-benchmark reproduction",
+    "Malformed Writer structure that would crash the original parser is logged and assigned zero reward; valid structures retain original reward computation"
+  ]
+}

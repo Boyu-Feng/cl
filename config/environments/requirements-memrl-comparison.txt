@@ -1,0 +1,5 @@
+# Python 3.12. Official algorithm ASTs need no MemOS server or remote API.
+# Reuses the pinned mainline ALFWorld runtime; no changes to active environments.
+-r requirements-alf_delta.txt
+# CLBench extras live in the independent structured_memory_deps PYTHONPATH target.
+# Install requirements-structured-memory.txt there with --no-deps as in EXPERIMENTS.md.

@@ -1,0 +1,13 @@
+# Python 3.12. Install the mainline alf_delta requirements first, then these
+# verified extra/version pins in a dedicated environment. GPU build: CUDA 12.6.
+torch==2.7.0
+transformers==4.52.4
+vllm==0.9.1
+accelerate==1.7.0
+faiss-cpu==1.12.0
+numpy==2.2.6
+openai==1.86.0
+pyarrow==25.0.1
+pandas==3.0.5
+requests==2.34.2
+huggingface-hub==0.36.2

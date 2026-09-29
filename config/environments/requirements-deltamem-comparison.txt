@@ -1,0 +1,12 @@
+# Isolated upstream inference service, verified on Python 3.10.20 / A100.
+# Benchmark workers retain requirements-alf_delta.txt on Python 3.12.
+torch==2.13.0
+transformers==5.16.1
+flash-attn==2.8.3.post1
+accelerate==1.14.0
+triton==3.7.1
+numpy==2.2.6
+safetensors==0.8.0
+tokenizers==0.23.1
+huggingface-hub==1.29.0
+einops==0.8.2

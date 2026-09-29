@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "paper": "https://arxiv.org/abs/2609.02253v1",
+  "official_source": {
+    "path": "current_work/APEx",
+    "commit": "dfa88ea893950f77712fa7bcd50ff3785d37a4d8",
+    "snapshot_sha256": "3d41165c1758429b469ad3e9b3afd79131052eec83cd65dcb76978031a16a80a"
+  },
+  "status": "preparation_only_not_training",
+  "pretrained_apex_checkpoints": {
+    "found": false,
+    "checked_utc_date": "2026-09-27",
+    "note": "Official README has local placeholder paths; no GitHub release. LightningCreeper/MIA model card identifies MIA arXiv:2604.04503; no APEx Writer present. MIA weights must not be labeled APEx."
+  },
+  "dataset": {
+    "repo": "LightningCreeper/MIA",
+    "revision": "7a8c6aff9b8b026de3cfeb148aa68a35ac21cd69",
+    "directory": "data/apex/MIA",
+    "files": [
+      {
+        "filename": "Train/Executor/fvqa_test.parquet",
+        "bytes": 796072078,
+        "sha256": "f149d17461ccd4cbb3b5ecec4a15903e89e83a74816df299e3297ac233658e13",
+        "role": "offline_validation_only"
+      },
+      {
+        "filename": "Train/Executor/fvqa_train.parquet",
+        "bytes": 1557700116,
+        "sha256": "338e9ea4ea405732346b8d4a53cedfb09f397a85c035a47fae85c937ba1e1a9b",
+        "role": "offline_train"
+      },
+      {
+        "filename": "Train/Planner/fvqa_matpo_train_planner.parquet",
+        "bytes": 20289419,
+        "sha256": "229992da5e5a9bd6148eb266baa9237335c1df2d740c86c8db9f15254df1dd82",
+        "role": "offline_train"
+      },
+      {
+        "filename": "image_search_cache/FVQA_Cache.zip",
+        "bytes": 598305167,
+        "sha256": "81359047762f13f15c03aa12594ca8f647f80af5ac9434a2c424238b9343323e",
+        "role": "offline_search_cache"
+      }
+    ]
+  },
+  "base_models": [
+    {
+      "repo": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "revision": "cc594898137f460bfe9f0759e9844b3ce807cfb5",
+      "directory": "models/apex/base/Qwen2.5-VL-7B-Instruct",
+      "allow_patterns": [
+        "*.json",
+        "*.txt",
+        "*.jinja",
+        "*.model",
+        "*.safetensors",
+        "README.md",
+        "LICENSE",
+        "LICENSE.*"
+      ],
+      "safetensors_bytes": 16584414560
+    },
+    {
+      "repo": "Qwen/Qwen3-8B",
+      "revision": "b968826d9c46dd6066d109eabc6255188de91218",
+      "directory": "models/apex/base/Qwen3-8B",
+      "allow_patterns": [
+        "*.json",
+        "*.txt",
+        "*.jinja",
+        "*.model",
+        "*.safetensors",
+        "README.md",
+        "LICENSE",
+        "LICENSE.*"
+      ],
+      "safetensors_bytes": 16381516776
+    },
+    {
+      "repo": "Qwen/Qwen3-32B",
+      "revision": "9216db5781bf21249d130ec9da846c4624c16137",
+      "directory": "models/apex/base/Qwen3-32B",
+      "allow_patterns": [
+        "*.json",
+        "*.txt",
+        "*.jinja",
+        "*.model",
+        "*.safetensors",
+        "README.md",
+        "LICENSE",
+        "LICENSE.*"
+      ],
+      "safetensors_bytes": 65524328560
+    },
+    {
+      "repo": "intfloat/e5-base-v2",
+      "revision": "f52bf8ec8c7124536f0efb74aca902b2995e5bcd",
+      "directory": "models/apex/base/e5-base-v2",
+      "allow_patterns": [
+        "*.json",
+        "*.txt",
+        "*.jinja",
+        "*.model",
+        "*.safetensors",
+        "README.md",
+        "LICENSE",
+        "LICENSE.*"
+      ],
+      "safetensors_bytes": 437955512
+    },
+    {
+      "repo": "princeton-nlp/sup-simcse-bert-base-uncased",
+      "revision": "2d82fab19ac3a73a20dd20333d27eb8a52d6e97f",
+      "directory": "models/apex/base/sup-simcse-bert-base-uncased",
+      "allow_patterns": [
+        "*.json",
+        "*.txt",
+        "*.jinja",
+        "*.model",
+        "*.safetensors",
+        "README.md",
+        "LICENSE",
+        "LICENSE.*",
+        "pytorch_model.bin"
+      ],
+      "safetensors_bytes": 0
+    }
+  ],
+  "trained_checkpoints": {
+    "executor": "models/apex/trained/executor",
+    "writer": "models/apex/trained/writer",
+    "planner": "models/apex/trained/planner"
+  },
+  "generated_training_assets": [
+    "data/apex/writer/writer_train.parquet",
+    "data/apex/writer/writer_val.parquet",
+    "data/apex/writer/skill_repo.json"
+  ],
+  "retrieval_assets": [
+    "data/apex/wiki25/wiki25.jsonl",
+    "data/apex/faiss/e5_Flat.index"
+  ],
+  "runtime": {
+    "upstream_python": "3.10.12",
+    "dedicated_env": "ttcl/.runtime/apex_env",
+    "official_gpu_count": 8,
+    "available_gpu_memory_threshold_mib": 1500,
+    "environment_validated": false
+  },
+  "clbench_protocol": {
+    "status": "design_only_adapter_not_implemented",
+    "domain_task_counts": {
+      "blind_spectrum_monitoring": 90,
+      "exploitable_poker": 120,
+      "database_exploration": 30,
+      "cohort_studies": 20,
+      "sales_prediction": 12,
+      "codebase_adaptation": 19
+    },
+    "generation_seeds": [
+      303,
+      404
+    ],
+    "official_scoring": true,
+    "score_from_first_task": true,
+    "no_hidden_ground_truth_in_update": true,
+    "reward_source": "nogt",
+    "online_parameter_target": "planner",
+    "online_memory_updates": true,
+    "reset_state_between_domains_and_seeds": true,
+    "note": "First-attempt/pre-update scores must be separated from any multi-rollout adaptation or retry scores; freeze budgets before launching. Sales/code require Docker preflight. This file does not claim any CLBench run was started."
+  }
+}
