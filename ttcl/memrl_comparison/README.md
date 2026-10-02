@@ -93,3 +93,79 @@ a real training-only / CL calibration-prefix smoke test before evaluating.
 It never stops existing GPU jobs. `status.json` distinguishes waiting, preflight,
 running, finished-with-failures and complete; `summary.json` contains current
 paired scores. `run status --root ...` refreshes the summary on demand.
+
+## CLBench public-state improvement experiment
+
+`improved_cl.py` is an optional task-aware extension to the frozen MemRL
+adaptation. It leaves the original memory store, writer, Q update and official
+task scorer intact. It adds only information already available to the agent:
+
+- **Blind Spectrum Monitoring:** cluster peaks from previous public scans,
+  require recurrence, and add credible dormant channels to the final report.
+  The report still contains the actor's current detections; the final action
+  and all added peaks are recorded in `policy_action.json`.
+- **Cohort Studies:** retain prior raw 108-field submissions and submit their
+  per-field running mean on later studies. This reduces dependence on any one
+  study's selection bias. A compact record of earlier public group-survival
+  tool measurements is also exposed; native retrieval can search across
+  studies without the original same-stage-only similarity cutoff.
+
+State is updated only after each instance from its public input, tool feedback
+or raw actor submission. Hidden grader values are not used to construct state
+or final actions. The original MemRL Q updater still receives the official
+reward as in the frozen comparison, so this is a controlled method extension,
+not a score-hidden CLBench submission. Because the extension was designed
+after inspecting the original CLBench run, the same 90/20 instances are a
+development validation, not an untouched final test.
+
+With the original frozen plan and a compatible frozen actor server running,
+evaluate each domain/repeat into a new directory:
+
+```bash
+python -m ttcl.memrl_comparison.evaluate_improved_cl \
+  --origin "$PWD/results/memrl_comparison/20260928_budgeted" \
+  --output "$PWD/results/memrl_improved_cl/new_bsm_303" \
+  --task blind_spectrum_monitoring --repeat 303 \
+  --url http://127.0.0.1:18537 --temperature .7
+```
+
+The runner freezes its design, source files, input hashes, memory snapshots,
+actor completions and final actions. Run the analogous commands for repeat
+404 and `cohort_studies`, then use `analyze_improved_cl.py` with `--root` and
+`--output` to compute paired last-80% scores. The two `offline_*_check.py`
+scripts isolate the public-state mechanisms with the official scorer; they
+do not replace the online actor evaluation.
+
+### Completed development validation, 2026-10-01
+
+Both repeats completed all scheduled cells. Scores below are paired on each
+domain's last 80%, with unscored cells excluded from both arms, never filled
+with zero. The actor temperature is 0.7, as in the original MemRL CL run.
+
+| Domain | Scored pairs | Vanilla MemRL | Public-state extension | Difference | Wins/losses/ties | Task-cluster bootstrap 95% interval for difference |
+|---|---:|---:|---:|---:|---:|---:|
+| Blind Spectrum Monitoring | 144/144 | 0.218928 | 0.545759 | +0.326831 | 144/0/0 | +0.307222 to +0.345653 |
+| Cohort Studies | 30/32 | -0.000754 | 0.083451 | +0.084205 | 29/1/0 | +0.050773 to +0.120646 |
+
+All 360 BSM cells scored. Cohort recorded 80/80 cells; two schema-invalid
+actions in repeat 404 (one in each policy, on different studies) left two
+unscored pairs. The mean is computed over the 30 shared scored pairs. The
+bootstrap resamples canonical instance indices while keeping both repeats
+together; the interval is descriptive because the method was developed after
+inspecting this benchmark.
+
+The saved final actions were independently re-scored against the official
+task scorers. In BSM, the actor's raw report averaged 0.245658 and the final
+report 0.545759; adding historical channels produced the large gain. In
+Cohort, the actor's raw submission averaged -0.003417 and the running-mean
+submission 0.083451; the numerical aggregation, rather than simply showing
+the agent more text, produced the gain. These checks and the per-stage tables
+are saved under the ignored local `results/memrl_improved_cl/` directory.
+
+## Cross-benchmark MemRL candidate
+
+See [GENERAL_METHOD.md](GENERAL_METHOD.md) for the causal-utility research
+direction, the frozen contextual-gate implementation, paired online results,
+and the disjoint-game regression that rejects that gate as a general method.
+`credit_probe.py` supports paired leave-one-out replay of individual memories;
+those probes are diagnostics, not a trained per-memory credit model.

@@ -100,6 +100,8 @@ def cl_cell(plan, client, memory, name, index, arm, output):
     save(output/'retrieval.json',retrieval)
     if retrieval['context']:
         system.messages[0]['content'] += '\n\nPast experience:\n'+retrieval['context']
+    if memory is not None and hasattr(memory, 'decorate_system'):
+        memory.decorate_system(system)
     recorder = base.Recorder(output,system,1)
     before = (memory.calls,memory.input_tokens,memory.output_tokens) if memory else (0,0,0)
     limits_before=memory.limit_hits if memory else 0
