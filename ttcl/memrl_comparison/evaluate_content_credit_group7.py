@@ -19,7 +19,8 @@ from .probe_set_conditional_credit import _mse, _predict, _subset, _validate_rev
 
 
 def evaluate(fit_report: Path, group5: Path, group6: Path, reviews5: Path,
-             reviews6: Path, group7: Path, reviews7: Path) -> dict:
+             reviews6: Path, group7: Path, reviews7: Path,
+             prediction_freeze: Path) -> dict:
     frozen = read(fit_report)
     recreated = fit(group5, group6, reviews5, reviews6)
     if frozen != json.loads(json.dumps(recreated)):
@@ -58,6 +59,19 @@ def evaluate(fit_report: Path, group5: Path, group6: Path, reviews5: Path,
     columns = frozen['selected_columns']
     coefficient = frozen['coefficients']
     prediction = _predict(testing, tuple(columns), coefficient)
+    sealed = read(prediction_freeze)
+    expected_rows = [dict(case=row['case'], input_sha256=row['input_sha256'],
+                          snapshot_sha256=row['source_snapshot_sha256'],
+                          retrieval_sha256=row['retrieval_sha256'],
+                          subset=row['subset'], prediction=value)
+                     for row, value in zip(testing, prediction)]
+    if (sealed['schema'] != 'content_set_credit_group7_prediction_freeze_v1' or
+            sealed['fit_report_sha256'] != sha(fit_report) or
+            sealed['group7_design_sha256'] != sha(group7 / 'design.json') or
+            sealed['group7_source_design_sha256'] != sha(origin / 'design.json') or
+            sealed['reviews7_sha256'] != sha(reviews7) or
+            sealed['rows'] != expected_rows):
+        raise ValueError('Sealed pre-outcome group7 predictions changed')
     model_mse = _mse(testing, prediction)
     zero_mse = _mse(testing, [0.] * len(testing))
     by_input = defaultdict(list)
@@ -75,6 +89,7 @@ def evaluate(fit_report: Path, group5: Path, group6: Path, reviews5: Path,
     nonzero = [row for row in examples if row['label']]
     return dict(schema='content_set_credit_group7_prospective_v1',
                 frozen_fit_sha256=sha(fit_report),
+                prediction_freeze_sha256=sha(prediction_freeze),
                 group7_design_sha256=sha(group7 / 'design.json'),
                 group7_source_design_sha256=sha(origin / 'design.json'),
                 group7_reviews_sha256=sha(reviews7),
@@ -96,13 +111,13 @@ def evaluate(fit_report: Path, group5: Path, group6: Path, reviews5: Path,
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     for option in ('fit-report', 'group5', 'group6', 'reviews5', 'reviews6',
-                   'group7', 'reviews7', 'report'):
+                   'group7', 'reviews7', 'prediction-freeze', 'report'):
         parser.add_argument('--' + option, type=Path, required=True)
     args = parser.parse_args()
     result = evaluate(args.fit_report.resolve(), args.group5.resolve(),
                       args.group6.resolve(), args.reviews5.resolve(),
                       args.reviews6.resolve(), args.group7.resolve(),
-                      args.reviews7.resolve())
+                      args.reviews7.resolve(), args.prediction_freeze.resolve())
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, indent=2, ensure_ascii=False) + '\n')
     print(json.dumps({key: value for key, value in result.items()
