@@ -30,9 +30,11 @@ def shapley_three(values: dict[frozenset[int], float]) -> list[float]:
 def audit(output: Path) -> dict:
     design = read(output / 'design.json')
     if design['schema'] not in ('alf_three_memory_coalition_v1',
-                                'alf_three_memory_coalition_holdout_v1'):
+                                'alf_three_memory_coalition_holdout_v1',
+                                'alf_three_memory_coalition_group6_v1'):
         raise ValueError('Wrong design schema')
     holdout = design['schema'] == 'alf_three_memory_coalition_holdout_v1'
+    group6 = design['schema'] == 'alf_three_memory_coalition_group6_v1'
     origin = Path(design['origin'])
     report = audit_source(origin)
     if not report['complete'] or report['missing']:
@@ -42,8 +44,12 @@ def audit(output: Path) -> dict:
                            ('complete.json', design['source_complete_sha256'])):
         if sha(origin / name) != expected:
             raise ValueError(f'Source {name} changed')
+    if group6 and sha(origin / 'cross_group_input_audit.json') != design['cross_group_audit_sha256']:
+        raise ValueError('Group6 cross-group input audit changed')
     root = Path(__file__).parent
-    runner = 'probe_alf_coalition_holdout.py' if holdout else 'probe_alf_coalition_credit.py'
+    runner = ('probe_alf_coalition_group6.py' if group6 else
+              'probe_alf_coalition_holdout.py' if holdout else
+              'probe_alf_coalition_credit.py')
     if (sha(root / runner) != design['runner_sha256'] or
             sha(root / 'credit_probe.py') != design['credit_probe_sha256']):
         raise ValueError('Frozen runner source changed')
@@ -54,6 +60,10 @@ def audit(output: Path) -> dict:
                 sha(root / 'probe_alf_coalition_credit.py') != design['previous_runner_sha256'] or
                 [item['case'] for item in design['cases']] != selected_cases(origin)):
             raise ValueError('Outcome-blind selection changed')
+    if group6:
+        from .probe_alf_coalition_group6 import selected_cases
+        if [item['case'] for item in design['cases']] != selected_cases(origin):
+            raise ValueError('Outcome-blind group6 selection changed')
     plan = read(origin / 'plan.json')
     units, missing = [], []
     for item in design['cases']:
@@ -130,7 +140,7 @@ def audit(output: Path) -> dict:
                 design_sha256=sha(output / 'design.json'),
                 expected=len(design['cases']) * len(design['repeats']),
                 audited=len(units), missing=missing, units=units,
-                caveat='Posthoc fixed-snapshot official train probe; no online Q or writer update')
+                caveat='Fixed-snapshot official train probe; no online Q or writer update')
 
 
 def main() -> None:
