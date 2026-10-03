@@ -449,7 +449,7 @@ stop reasons are in their `analysis_partial.json` and
 `stopped_early.json` files. Neither is a complete six-family result;
 the consolidated status is in `RESULTS_20261003.md`.
 
-`v36` is a code-only, no-training ALFWorld candidate. It keeps v27 retrieval
+`v36` is a no-training ALFWorld candidate. It keeps v27 retrieval
 on every text attempt. If two or more memories were shown, it records their
 IDs as deferred for direct Q credit instead of broadcasting the terminal
 reward to each of them; singleton updates and the source-bound native writer
@@ -462,13 +462,56 @@ per-attempt actor-call limit. If the final available call produces an invalid
 command, the attempt ends as a recorded failure without stepping the
 environment. A valid native command is passed through. Structured JSON
 actions retain v27/v26 behavior.
-This design does not estimate individual causal memory value, and the Q deferral
-and action repair must be ablated separately before either mechanism gets
-credit. No actor evaluation, official reward, training or GPU run has been
-performed for v36. The independent runner freezes a `both`, `credit_only`, or
-`repair_only` candidate mode in each new output directory to separate the two
-interventions. The earlier v31/v34 negative transfers remain applicable
-warnings against assuming an ALFWorld gain.
+This design does not estimate individual causal memory value. Independent
+`both`, `credit_only`, and `repair_only` runs froze each candidate mode in a new
+output directory. On six official ALFWorld **train** look games (repeat 92721),
+the paired three-attempt results were: `both` 5 wins / 0 losses / 1 tie
+(candidate 5/6, native 0/6); `repair_only` 5 / 0 / 1 (also 5/6 vs 0/6);
+`credit_only` 0 / 1 / 5 (candidate 0/6, native 1/6). These are separate online
+chains, so their score differences are not a factorial estimate. Native actor
+completions are stochastic across runs even with the same nominal seed.
+
+The predeclared simple-family guardrail caught a negative result. `both`
+completed only the first three of six train pairs: 0 wins / 1 loss / 2 ties,
+candidate 2/3 vs native 3/3. We stopped that run; the other three games are
+missing, and an interrupted fourth native game is unscored. In a separate
+two-game simple pilot, `repair_only` was 0 / 1 / 1 (candidate 1/2 vs native
+2/2); `credit_only` was 0 / 0 / 2, with no Q deferral on either game. On the
+simple loss in the combined run, the first retrieved IDs and context were
+identical and empty, and the commands matched through step 17. At step 18,
+the native actor emitted invalid `go to drawer 8`, while the candidate
+repaired it to admissible `go to drawer 9`. The candidate later exhausted all
+three 50-call attempts and failed; native succeeded on its second attempt.
+The repair-only loss confirms that Q deferral is not necessary for this
+negative case. Validity repair can alter the trajectory without improving
+task success.
+
+The credit-only look loss is downstream of online memory divergence: on game
+two, both arms retrieved the same IDs and context in attempts one and two,
+but the candidate deferred the two-ID failed-attempt Q update whereas native
+set both Q values to -0.3/-0.51 as applicable. Attempt three then had a
+different retrieval order/context; by game five, the first retrieval IDs and
+prompt differed, and native won while candidate failed. This does not identify
+a single harmful memory or prove that Q deferral alone caused the loss.
+
+All completed rows retained official scoring, per-attempt actor-call limits,
+input hashes, frozen source hashes, and failed-attempt records. `both` used
+208 candidate actor calls vs 900 native on look; `repair_only` used 318 vs
+900. In the scored simple prefix, `both` used 184 vs 135, and in the
+two-game `repair_only` pilot 176 vs 81. Candidate repair runs executed zero
+invalid commands, but the extra guided completions count toward those totals.
+No new model training, `valid_unseen` confirmation, or independent CLBench
+run was performed. Structured JSON actions retain the v27/v26 branch. The
+train look gain is local evidence; the simple regression rules out v36 as a
+general ALFWorld improvement.
+
+The ignored local result roots are
+`results/memrl_credit_training/20261003_v36_{both,repair_only,credit_only}_alf_look_train_full6_v1/`,
+`20261003_v36_both_alf_simple_train_full6_v1/`, and
+`20261003_v36_{repair_only,credit_only}_alf_simple_train_pilot2_v1/`
+under the same parent. Each completed run has `analysis.json`; the stopped
+simple run has `analysis_partial.json` and `stopped_early.json`. Raw trajectories
+and model assets are intentionally absent from Git.
 
 A post-hoc CPU audit compared the current Database question directly
 with each stable action/feedback group, instead of matching it only to
