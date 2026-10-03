@@ -27,6 +27,43 @@ These are within-run paired differences, not cross-version policy effects.
 The detailed source bindings, official-score audits, costs, and caveats are
 recorded below and in each ignored run's `design.json` and `analysis.json`.
 
+### Why the retained experience did not protect ALFWorld
+
+The ALFWorld text-command path in v21 inherits v15's retrieval schedule:
+attempts one and two call native MemRL retrieval against that arm's *own*
+online memory, while attempt three removes the retrieved actor context and
+withholds Q credit from suppressed IDs. The public-event ledger and typed
+JSON action projection do not enter the ALFWorld actor path. Thus retaining
+the native memory implementation does not mean that both arms see identical
+experience after their online trajectories diverge.
+
+A read-only audit of the complete `valid_unseen` repeat-92602 chains found
+that first-attempt context hashes matched on only 2/31 clean games and 2/18
+look games. Every candidate-only first-attempt loss (8 clean, 5 look) had a
+different context from native, although the candidate retrieved nonempty
+native MemRL experience; the paired game, initial observation, and actor seed
+matched. The saved first-attempt actions diverged by steps 1–8 in those cases.
+For example, clean game 14 retrieved three entries in each arm, but different
+IDs and text: native succeeded on its first attempt and v21 failed. The
+candidate's first command was `look`, while native began with
+`go to handtowelholder 1`.
+
+The earliest observed state split is concrete. In clean game 1, the first
+two attempts had identical context, actions, and reward; the third attempt
+omitted memory only in v21 and diverged at action 2. Both still scored zero,
+but their subsequent stored trajectory text and Q values differed (for
+`memory_000000`, Q was -0.51 native versus -0.30 candidate). In look, game 1
+was a common first-attempt success; game 2's first two attempts matched, then
+the third-attempt dropout changed the action trajectory despite both arms
+eventually succeeding. Their Q values and later retrievals diverged. These
+observations explain how first-attempt context can differ even though native
+experience storage remains enabled. They do **not** by themselves prove that
+the dropout uniquely caused every later loss: only three games across both
+families reached a third attempt after fully matched first two trajectories,
+and all three third-attempt rewards tied. The full online result establishes
+negative transfer, while a frozen-state intervention would be needed to
+isolate the contribution of a particular history change.
+
 The follow-up, official-train fixed-snapshot probes in
 `PAIRED_CREDIT_RL.md` also reject a simple prompt-level repair.
 On 22 selected ALFWorld train games and three actor seeds, unchanged
