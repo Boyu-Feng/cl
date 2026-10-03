@@ -1,0 +1,122 @@
+"""Independently score repeated official ALFWorld source-success filter arms."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+
+from ttcl.experience_evolution.core import seed
+from ttcl.icl_mem0_comparison.protocol import read, sha
+from .credit_probe import memory_arms
+from .validate_alf_source_success_filter import (ORDERS, filtered_context,
+                                                  frozen_design)
+
+
+def audit(output: Path) -> dict:
+    design_path = output / 'design.json'
+    design = read(design_path)
+    if design['schema'] != 'alf_source_success_filter_validation_v1':
+        raise ValueError('Wrong validation schema')
+    origin = Path(design['origin'])
+    expected = frozen_design(origin, Path(design['exploration']),
+                             Path(design['prior_validation']))
+    if design != expected:
+        raise ValueError('Frozen selection, source, or rule changed')
+    plan = read(origin / 'plan.json')
+    units, missing = [], []
+    for item in design['cases']:
+        case = item['case']
+        spec, arms = memory_arms(origin, case)
+        kept, filtered = filtered_context(spec, arms)
+        if (kept != item['kept_indices'] or
+                hashlib.sha256(filtered.encode()).hexdigest() !=
+                item['filtered_sha256'] or
+                spec['arm_context_sha256']['full'] != item['full_sha256'] or
+                sha(Path(plan['alf']['data_root']) /
+                    spec['original_memrl']['game']) != item['input_sha256']):
+            raise ValueError('Filtered memory or game changed')
+        game = spec['original_memrl']['game']
+        for repeat in design['repeats']:
+            target = output / case / f'actor_repeat_{repeat}'
+            summary_path = target / 'summary.json'
+            if not summary_path.exists():
+                missing.append(dict(case=case, repeat=repeat))
+                continue
+            summary, order = read(summary_path), read(target / 'order.json')
+            index = int(hashlib.sha256(f'{case}/{repeat}'.encode()).hexdigest(), 16) % 2
+            names = list(ORDERS[index])
+            if (order != dict(names=names, seed=repeat) or
+                    summary['case'] != case or summary['repeat'] != repeat or
+                    summary['design_sha256'] != sha(design_path) or
+                    summary['order'] != names or set(summary['replay']) != set(names)):
+                raise ValueError('Balanced arm order or summary changed')
+            rewards, actions, calls, initial = {}, {}, 0, None
+            for name in names:
+                episode = read(target / name / 'episode.json')
+                context = arms['full'] if name.startswith('full') else filtered
+                state = (episode['initial_observation'],
+                         episode['initial_commands_sha256'])
+                if initial is None:
+                    initial = state
+                elif state != initial:
+                    raise ValueError('Paired arms started in different states')
+                if (episode['status'] != 'complete' or episode['game'] != game or
+                        episode['seed'] != seed(repeat, game, 0, 'actor') or
+                        episode['memory'] != context or
+                        episode['memory_sha256'] != hashlib.sha256(context.encode()).hexdigest() or
+                        episode['reward'] not in (0, 1) or
+                        not 1 <= episode['steps'] <= 50 or
+                        episode['steps'] != len(episode['trajectory']) or
+                        episode['steps'] != len(episode['generations'])):
+                    raise ValueError('Official episode differs from frozen arm')
+                actual = dict(reward=episode['reward'], steps=episode['steps'],
+                              first_action=episode['trajectory'][0]['action'])
+                if actual != summary['replay'][name]:
+                    raise ValueError('Reported reward differs from episode')
+                rewards[name] = episode['reward']
+                actions[name] = [step['action'] for step in episode['trajectory']]
+                calls += len(episode['generations'])
+            candidate = [rewards['filtered'], rewards['filtered_repeat']]
+            baseline = [rewards['full'], rewards['full_repeat']]
+            effect = (sum(candidate) - sum(baseline)) / 2
+            radius = (abs(candidate[0] - candidate[1]) +
+                      abs(baseline[0] - baseline[1])) / 2
+            units.append(dict(case=case, repeat=repeat, kept_indices=kept,
+                              candidate=candidate, baseline=baseline,
+                              primary_delta=candidate[0] - baseline[0],
+                              corrected_effect=effect, repeat_noise_radius=radius,
+                              decisive_positive=effect > radius + 1e-12,
+                              decisive_negative=effect < -radius - 1e-12,
+                              full_actions_equal=actions['full'] == actions['full_repeat'],
+                              candidate_actions_equal=
+                              actions['filtered'] == actions['filtered_repeat'],
+                              actor_calls=calls))
+    return dict(schema='alf_source_success_filter_audit_v1',
+                design_sha256=sha(design_path),
+                expected=len(design['cases']) * len(design['repeats']),
+                audited=len(units), missing=missing, units=units,
+                totals=dict(primary_wins=sum(u['primary_delta'] > 0 for u in units),
+                            primary_losses=sum(u['primary_delta'] < 0 for u in units),
+                            decisive_positive=sum(u['decisive_positive'] for u in units),
+                            decisive_negative=sum(u['decisive_negative'] for u in units),
+                            full_actions_equal=sum(u['full_actions_equal'] for u in units),
+                            candidate_actions_equal=sum(u['candidate_actions_equal'] for u in units),
+                            actor_calls=sum(u['actor_calls'] for u in units)),
+                caveat='Source success is historic feedback, not a current-task causal label; fixed snapshot only')
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--report', type=Path)
+    args = parser.parse_args()
+    result = audit(args.output.resolve())
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(result, indent=2, ensure_ascii=False) + '\n')
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    main()
