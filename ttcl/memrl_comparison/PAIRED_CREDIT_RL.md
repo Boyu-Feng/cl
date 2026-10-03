@@ -214,6 +214,48 @@ paired ALFWorld evaluation across all six families and three seeds, and a
 CLBench evaluation across all four domains and two repeats. Static deletion
 labels and cross-fitting cannot substitute for those online results.
 
+## Repeated-control writer credit after the Q-chain regression
+
+`noise_aware_writer_credit.py` now adds an optional training-only gate around
+the audited whole-chain scorer. It requires five independently recorded arms
+per chain seed: candidate, candidate repeat, previous document, previous
+repeat, and empty-memory diagnostic. Each arm keeps its own continuous memory
+chain over the same newly reviewed target order. The same root, source trace,
+input-content hashes, writer freeze and execution-plan hash must bind every
+row; run hashes must differ across arms and seeds. The collector still needs
+to freeze and verify its arm order before target rollout. Recorded execution
+ordinals must alternate candidate and previous controls in an ABBA or BAAB
+order at each target, while each arm's tasks stay in their original sequence.
+No collector or
+writer training has run for this new protocol.
+
+For each seed, the scorer compares the mean return of the two candidate
+chains with the mean return of the two previous-document chains. It releases
+policy-gradient credit only when the two return ranges do not overlap in
+**every** seed and point in the same direction. Otherwise it keeps the
+diagnostic effect and sets the training advantage to zero. Identical
+candidate/previous text always receives zero credit. This is a strict
+evidence gate, not a calibrated confidence interval; two repeats cannot
+measure every source of actor or writer variation. The existing whole-chain
+scorer continues to audit official rewards, actor cost, task order, reviewed
+targets and within-arm snapshot continuity. Twelve focused unit tests of the
+old and new scorers pass, including a case where an apparently positive
+candidate gain is matched by a same-document control gain and must not become
+a training label.
+
+The need for these controls was observed directly in the ALFWorld credit
+experiment: an identical actor prompt and seed led to different actions in
+separate online runs, while 12 immediate repeats of the selected fifth-step
+prompt all chose the later action. This post-hoc prompt was selected because
+it had diverged, so 12/12 is not a general reproducibility rate. A newer
+memory-optimization study also frames writer credit as a memory rewrite's
+incremental value against the previous memory over future targets
+([MGPO](https://arxiv.org/abs/2609.37930)); its document-extraction gains do
+not establish gains for MemRL on ALFWorld or CLBench. Trace-continuation
+credit for LLM teams provides another methodological reference
+([C3](https://arxiv.org/abs/2603.06859)), but our mutable memory and
+stochastic actor require the separate chain and noise checks above.
+
 ## Next train-only interventions (2026-10-03)
 
 `probe_evidence_frame.py` freezes 66 actor-seed pairs on the same 22
