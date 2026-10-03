@@ -29,8 +29,10 @@ def shapley_three(values: dict[frozenset[int], float]) -> list[float]:
 
 def audit(output: Path) -> dict:
     design = read(output / 'design.json')
-    if design['schema'] != 'alf_three_memory_coalition_v1':
+    if design['schema'] not in ('alf_three_memory_coalition_v1',
+                                'alf_three_memory_coalition_holdout_v1'):
         raise ValueError('Wrong design schema')
+    holdout = design['schema'] == 'alf_three_memory_coalition_holdout_v1'
     origin = Path(design['origin'])
     report = audit_source(origin)
     if not report['complete'] or report['missing']:
@@ -41,9 +43,17 @@ def audit(output: Path) -> dict:
         if sha(origin / name) != expected:
             raise ValueError(f'Source {name} changed')
     root = Path(__file__).parent
-    if (sha(root / 'probe_alf_coalition_credit.py') != design['runner_sha256'] or
+    runner = 'probe_alf_coalition_holdout.py' if holdout else 'probe_alf_coalition_credit.py'
+    if (sha(root / runner) != design['runner_sha256'] or
             sha(root / 'credit_probe.py') != design['credit_probe_sha256']):
         raise ValueError('Frozen runner source changed')
+    if holdout:
+        from .probe_alf_coalition_credit import CASES as previous_cases
+        from .probe_alf_coalition_holdout import selected_cases
+        if (design['previous_cases'] != list(previous_cases) or
+                sha(root / 'probe_alf_coalition_credit.py') != design['previous_runner_sha256'] or
+                [item['case'] for item in design['cases']] != selected_cases(origin)):
+            raise ValueError('Outcome-blind selection changed')
     plan = read(origin / 'plan.json')
     units, missing = [], []
     for item in design['cases']:
