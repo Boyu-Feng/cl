@@ -92,6 +92,13 @@ versus 0.151372 for predicting zero, but the frozen confidence rule still
 removed **zero** entries. The two repeats share six public inputs and source
 lineage; these are neither 12 independent tasks nor an online-policy gain.
 See `CREDIT_ASSIGNMENT_NEXT.md` for the full audit and interaction results.
+An exploratory set-conditioned ridge model then added pairwise products of
+the existing numeric retrieval features. Against an otherwise identical
+individual-only fit, old input-held-out MSE worsened from 0.087859 to
+0.095837; new-input MSE changed only from 0.130437 to 0.129806. Because the
+new outcomes were inspected before choosing this model structure, that small
+new-input difference is not an independent validation. It has not been used
+for online retrieval or Q updates.
 
 A simple historical-success filter is also unsupported by these labels.
 Among the 60 bound ALFWorld memory examples, 47 came from unsuccessful
