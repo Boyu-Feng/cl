@@ -83,6 +83,16 @@ demonstrated improvement over native retrieval. The smaller provisional
 first-wave model also removed zero memories; its apparent error reduction
 did not survive the additional outcome-blind ALFWorld cases.
 
+The original 78-example policy was subsequently tested without refitting on
+six new content-hash-selected Poker calibration-prefix inputs, each in repeat
+303 and 404 with three actor seeds. All 36 source-chain/seed cells and 25
+memory examples passed source, context, actor-seed and official-reward audits.
+Using the original training reward scale, its held-out MSE was 0.130437
+versus 0.151372 for predicting zero, but the frozen confidence rule still
+removed **zero** entries. The two repeats share six public inputs and source
+lineage; these are neither 12 independent tasks nor an online-policy gain.
+See `CREDIT_ASSIGNMENT_NEXT.md` for the full audit and interaction results.
+
 A simple historical-success filter is also unsupported by these labels.
 Among the 60 bound ALFWorld memory examples, 47 came from unsuccessful
 source episodes and had mixed marginal signs (eight positive, seven
