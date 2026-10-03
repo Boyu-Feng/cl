@@ -449,6 +449,27 @@ stop reasons are in their `analysis_partial.json` and
 `stopped_early.json` files. Neither is a complete six-family result;
 the consolidated status is in `RESULTS_20261003.md`.
 
+`v36` is a code-only, no-training ALFWorld candidate. It keeps v27 retrieval
+on every text attempt. If two or more memories were shown, it records their
+IDs as deferred for direct Q credit instead of broadcasting the terminal
+reward to each of them; singleton updates and the source-bound native writer
+remain unchanged. At each text step, it first asks the same native actor for
+one command. A command outside the currently advertised public admissible
+set is not executed: one extra guided-choice completion on that same public
+observation supplies the command. Both completions, tokens, seeds, source
+hashes and the repaired command are recorded and charged against the original
+per-attempt actor-call limit. If the final available call produces an invalid
+command, the attempt ends as a recorded failure without stepping the
+environment. A valid native command is passed through. Structured JSON
+actions retain v27/v26 behavior.
+This design does not estimate individual causal memory value, and the Q deferral
+and action repair must be ablated separately before either mechanism gets
+credit. No actor evaluation, official reward, training or GPU run has been
+performed for v36. The independent runner freezes a `both`, `credit_only`, or
+`repair_only` candidate mode in each new output directory to separate the two
+interventions. The earlier v31/v34 negative transfers remain applicable
+warnings against assuming an ALFWorld gain.
+
 A post-hoc CPU audit compared the current Database question directly
 with each stable action/feedback group, instead of matching it only to
 prior questions. The helpful episode-14 readout's three selected groups
