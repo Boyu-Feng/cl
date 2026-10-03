@@ -195,6 +195,22 @@ URL accidentally included `/v1`, which the client adds automatically, and
 received HTTP 404 before any model result. The completed pilot used a new
 output directory and the corrected base URL.
 
+The later independent repeat-92602 `valid_unseen` clean-family run completed
+all 31 paired games without failed cells. Native and v27 both succeeded on
+12/31 first attempts and 18/31 within three attempts: 31 ties, zero wins,
+zero losses. All 63 paired attempts matched on retrieval context hashes and
+IDs, public trajectories and rewards; each arm used 2,567 actor calls and
+17,028,659 input tokens. This establishes same-run parity for the full clean
+family, rather than a v27 success gain. The look-family run was stopped at
+the user's request after 13 of 18 paired games. In the completed prefix,
+both arms succeeded on 2/13 first attempts and 6/13 within three attempts,
+with 13 ties and no wins or losses; actor calls and input tokens were equal
+at 1,354 and 8,702,080 per arm. The five uncompleted games are recorded as
+missing, and the interrupted native game has no scored row. These same-run
+results do not establish a full look-family score. The structured CLBench
+branch inherits v26, whose repeat-404 four-domain results are reported above;
+v27 has not had an independent full CLBench evaluation.
+
 `grounded_evidence_v28.py` is a new training-only writer candidate.
 On any failed public trajectory, it uses the existing single MemRL
 writer call and token cap to ask for an evidence-bound retry reflection:
