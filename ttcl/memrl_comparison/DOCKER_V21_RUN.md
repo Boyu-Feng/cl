@@ -24,11 +24,11 @@ docker info --format '{{.ServerVersion}}'
 ttcl/.runtime/alf_delta_env/bin/python -m ttcl.memrl_comparison.evaluate_v21_docker \
   --origin results/memrl_comparison/20260928_budgeted \
   --output results/memrl_comparison/v21_docker_sales_pilot_303 \
-  --task sales_prediction --repeat 303 --limit 2 --url http://127.0.0.1:18557/v1
+  --task sales_prediction --repeat 303 --limit 2 --url http://127.0.0.1:18557
 ttcl/.runtime/alf_delta_env/bin/python -m ttcl.memrl_comparison.evaluate_v21_docker \
   --origin results/memrl_comparison/20260928_budgeted \
   --output results/memrl_comparison/v21_docker_codebase_pilot_303 \
-  --task codebase_adaptation --repeat 303 --limit 2 --url http://127.0.0.1:18557/v1
+  --task codebase_adaptation --repeat 303 --limit 2 --url http://127.0.0.1:18557
 ```
 
 Inspect each pilot's `analysis.json`, `vanilla/progress.json`,

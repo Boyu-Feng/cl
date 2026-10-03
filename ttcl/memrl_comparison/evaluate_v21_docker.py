@@ -153,6 +153,9 @@ def calibrate_public_prefix(name: str, seed: int, count: int,
 
 def prepare(origin: Path, output: Path, name: str, repeat: int, url: str,
             limit: int | None, temperature: float) -> dict:
+    url = url.rstrip('/')
+    if url.endswith('/v1'):
+        url = url[:-3]
     if output.exists():
         raise FileExistsError(output)
     origin = origin.resolve()

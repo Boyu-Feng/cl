@@ -180,6 +180,20 @@ on all attempts, while structured JSON actions retain v26's native
 actor context and four-source numeric gate. The interface routing is
 unit-tested. This is a regression correction, not evidence of an
 ALFWorld gain; no universal-improvement claim follows from v27.
+An independent `evaluate_typed_grounded_v27.py` runner now freezes source
+hashes and paired input bindings for that policy. A two-game `valid_unseen`
+pilot in each of clean and look (repeat 92602, current frozen actor service)
+completed all eight arm cells. Within every game, native and v27 had identical
+retrieval IDs, context hashes, public action trajectories, rewards, and actor
+call counts on every attempted retry. Clean scored 0/2 in each arm (300 actor
+calls each); look scored 2/2 in each arm (70 actor calls each). Clean game 1
+had a third attempt with two nonempty retrieved IDs in both arms, directly
+checking that v27 removed v21's dropout at the earlier split. These four
+paired ties are a wiring check, not a full-family or cross-service score.
+The first attempted run is retained separately as a failed cell: its actor
+URL accidentally included `/v1`, which the client adds automatically, and
+received HTTP 404 before any model result. The completed pilot used a new
+output directory and the corrected base URL.
 
 `grounded_evidence_v28.py` is a new training-only writer candidate.
 On any failed public trajectory, it uses the existing single MemRL
