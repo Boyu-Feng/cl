@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+import unittest
+
+from .grounded_evidence_v6 import TypedGroundedMemory
+from .test_protocol import Embeddings
+from .test_typed_grounded import SelectorClient, VectorSchema
+
+
+class TypedGroundedV6Tests(unittest.TestCase):
+    def test_selector_sees_initial_and_prior_public_sample_context(self):
+        with TemporaryDirectory() as tmp:
+            plan = dict(upstream=str(Path(__file__).resolve().parents[2] /
+                                     'current_work/MemRL'), writer_max_tokens=768,
+                        memory_tokens=2048,
+                        rl_config=dict(epsilon=0., alpha=.3, gamma=0., topk=3))
+            client = SelectorClient()
+            client.selection = 'APPLY_1'
+            memory = TypedGroundedMemory(plan, client, tmp,
+                dict(threshold=.5, mean=.5, std=.1), Embeddings())
+            for episode in (1, 2):
+                trace = json.dumps([dict(query=f'Prior public sample {episode}',
+                    action={f'f{i}': episode / 10 for i in range(8)},
+                    public_feedback='Submission recorded')])
+                memory.update('same target', trace, 1., True,
+                              memory.retrieve('same target'), {})
+            memory.retrieve('same target')
+            output = Path(tmp) / 'actor'
+            output.mkdir()
+            system = SimpleNamespace(output=output,
+                public_steps=[dict(query='Current initial sample description',
+                                   action={'tool_call': {'tool': 'inspect'}},
+                                   public_feedback='Measured values')],
+                turn=3, calls=0, input_tokens=0, output_tokens=0,
+                max_input_tokens=0, last=None,
+                messages=[{'role': 'system', 'content': 'Solve task'}])
+
+            def actor(query):
+                values = {f'f{i}': .9 for i in range(8)}
+                action = VectorSchema.model_validate(values)
+                system.last = (query.prompt, values)
+                return SimpleNamespace(action=action, metadata={})
+
+            system.respond = actor
+            memory.decorate_system(system)
+            response = system.respond(SimpleNamespace(prompt='Submit all fields',
+                instance_id='current', response_schema=VectorSchema))
+            selector = next(messages for messages in reversed(client.messages)
+                            if 'Select a general state operator' in messages[0]['content'])
+            payload = json.loads(selector[1]['content'])
+            self.assertIn('Current initial sample', payload['episode_initial_task'])
+            self.assertEqual(len(payload['prior_episode_starts']), 2)
+            self.assertEqual(payload['allowed_operations'], ['KEEP', 'APPLY_1'])
+            self.assertEqual(payload['candidate_summaries'][0]['selection_label'],
+                             'APPLY_1')
+            self.assertAlmostEqual(response.action.model_dump()['f0'], .4)
+            self.assertIn('field completeness is irrelevant',
+                          selector[0]['content'])
+
+
+if __name__ == '__main__':
+    unittest.main()

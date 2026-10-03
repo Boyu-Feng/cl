@@ -9,6 +9,19 @@ does **not** reproduce the paper's original models or 3553-task × 10-epoch
 training budget. All actor weights remain frozen; Q values in episodic memory
 are learned online. No pretrained memory bank or historical labels are reused.
 
+The current outcome table and stopped-run status are in
+`RESULTS_20261003.md`; detailed evidence and credit design are in
+`GROUNDED_EVIDENCE.md` and `PAIRED_CREDIT_RL.md`. v21 has repeat-consistent
+CLBench gains on Spectrum and Cohort, but regressed on complete ALFWorld
+families; Database remains mixed and Poker uncertain. The v30 Database
+readout reversed sign across two full repeats, and v32's full repeat tied
+on mean score. Guided-command decoding v31 and v34 regressed on complete
+ALFWorld train families. The more conservative v35 was stopped at the
+user's request after 3/36 full-train pairs; it has no cross-family claim.
+No single method has yet improved ALFWorld and every CLBench domain.
+`counterfactual_writer_credit.py` is a CPU-only, source-bound full-horizon
+writer-credit scorer; it has not trained a writer or produced benchmark scores.
+
 ## What runs unchanged
 
 `upstream.py` compiles the official class/function definitions without modifying
@@ -167,5 +180,82 @@ are saved under the ignored local `results/memrl_improved_cl/` directory.
 See [GENERAL_METHOD.md](GENERAL_METHOD.md) for the causal-utility research
 direction, the frozen contextual-gate implementation, paired online results,
 and the disjoint-game regression that rejects that gate as a general method.
-`credit_probe.py` supports paired leave-one-out replay of individual memories;
-those probes are diagnostics, not a trained per-memory credit model.
+`credit_probe.py` supports paired leave-one-out replay of individual memories.
+See [PAIRED_CREDIT_RL.md](PAIRED_CREDIT_RL.md) for the source-bound CPU
+credit learner and its negative held-out diagnostic; it has not produced
+a useful trained selector. The same document reports train-only,
+same-service full-versus-empty, evidence-framing, and retry probes.
+
+## Generic structured-evidence extension
+
+`structured_evidence.py` is a separate cross-benchmark candidate. Each new
+MemRL item gets a `structured_evidence` metadata field containing bounded
+public action/observation events, the last public action, and a hash of the
+source trajectory. Free-form reasoning fields are omitted. The native writer,
+embedding/Q ranking and Q update remain in place. Retrieval softens the fixed
+absolute similarity cutoff, then packs the selected memory's short lesson and
+structured public evidence into the same 2,048-token budget. The same code is
+used for ALFWorld and every available CLBench domain; it has no task-name or
+domain-specific action rewrite. Earlier `improved_cl.py`,
+`general_evidence.py`, and `contextual_utility.py` remain available for their
+documented comparisons.
+
+`evaluate_structured_evidence.py` runs an immutable paired chain. The full
+queue entrypoint is `run_structured_full.py`; it schedules all six ALFWorld
+families × three seeds and four CLBench domains × two repeats from the frozen
+MemRL plan. Each cell independently builds memory from empty using the same
+actor seeds in both arms. Its `summary.json` reports ALFWorld first-attempt and
+within-three success, and each CLBench domain on the prespecified last 80%,
+using only common valid pairs. `status.json` and per-job logs retain failures.
+The full run takes substantially longer than the two-episode smoke checks;
+scores should be quoted only after the queue reaches a terminal state.
+
+## One general CLBench memory-update candidate
+
+`universal_evidence.py` is a single method applied without task-name, action
+schema, or final-action branches. Every CLBench episode contributes public
+query/action/feedback events bound to hashes. One frozen model prompt proposes
+`add`, `revise`, or `retire` operations on a cumulative evidence notebook;
+the same executor checks new-event citations and stable entry IDs in every
+domain. Invalid operations are recorded and rejected individually, and
+complete operations in a capped response can still be checked. Untouched
+entries persist. Retrieval ranks notebook claims with the same embedder for
+every query, then fits claims and native MemRL `Task` and `Experience` text in
+the declared 2,048 memory-token budget. The actor's final action is not
+rewritten. Native MemRL
+writer and Q updating remain in place, with official reward excluded from the
+notebook prompt and used only by native MemRL. Extra notebook model tokens are
+recorded separately per episode.
+
+This is a research candidate, not a validated improvement. Short paired
+pilots live under ignored `results/memrl_universal_evidence/20261002_dev/`.
+They verify that the same update path executes on all four CLBench domains;
+the tiny prefixes do not measure the prespecified last-80% outcome. The
+initial full queue was stopped when its actor context was found to omit the
+native `Task` text; its records remain frozen, and the corrected method uses
+a separate run directory. The
+schema-specific `cl_public_state` attempt was stopped and removed from code
+after it was identified as a collection of task-specific rules, rather than
+this general method. Its ignored result records remain marked stopped.
+
+## Source-grounded cross-benchmark candidate
+
+See [GROUNDED_EVIDENCE.md](GROUNDED_EVIDENCE.md) for a separate, task-name-free
+candidate that stores exact public events, distinguishes unverified submissions
+from environment responses, and uses one bounded retrieval rule in ALFWorld and
+CLBench. Its schema-valid direct-action review is an extra CLBench interface
+step. The frozen `v21` implementation completed two online repeats in all
+four CLBench domains, but its two complete ALFWorld families regressed,
+so it is not a general improvement. `v23` removes the unsupported
+unconditional third-attempt text-memory dropout while retaining the
+structured-action projection. It has only a small official-train wiring
+check and needs independent online evaluation before any benchmark claim.
+The separate `v24` candidate tests native/empty/native context across
+retryable text-command attempts under the existing three-attempt budget;
+its six-family official-train pilot finished at 9 wins, 2 losses and
+25 ties. The first complete valid-unseen family then regressed (simple
+pick-and-place: 2 wins, 4 losses, 18 ties), so the frozen run stopped
+with missing tasks preserved. v24 is not a general ALFWorld improvement.
+`v27` restores native retrieval for text retries while retaining the
+v26 structured-action projection; it removes the known regression but
+has no demonstrated ALFWorld gain.

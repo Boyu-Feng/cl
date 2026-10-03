@@ -1,0 +1,185 @@
+"""General typed-state readout over source-grounded MemRL public events."""
+from __future__ import annotations
+
+import json
+
+from ttcl.icl_mem0_comparison.protocol import append, save, seed
+from .grounded_evidence import GroundedEvidenceMemory, _clip, _json_object, public_value
+from .memory import digest
+from .typed_executor import apply_candidate
+from .typed_projection import typed_candidates
+
+
+OPERATIONS = {'numeric_consensus': 'NUMERIC_CONSENSUS',
+              'recurring_records': 'RECURRING_RECORDS'}
+
+
+def _candidate_summary(candidate, index):
+    summary = dict(kind=candidate['kind'], selection_label=f'APPLY_{index}',
+                   sample_count=candidate.get('sample_count'),
+                   path=candidate.get('path'),
+                   identity_field=candidate.get('identity_field'))
+    if candidate['kind'] == 'recurring_records':
+        summary['recurrent_records'] = [dict(
+            identity_value=record['identity_value'],
+            seen_in_episodes=record['seen_in_episodes'],
+            sample_record=record['sample_record'],
+            source_sha256=record['source_sha256'][-2:])
+            for record in candidate['records'][:16]]
+    return summary
+
+
+class TypedGroundedMemory(GroundedEvidenceMemory):
+    """Use the model only to select a general operator; execute it exactly."""
+
+    def __init__(self, plan, client, directory, calibration, embedder=None):
+        super().__init__(plan, client, directory, calibration, embedder=embedder)
+        self.signature = digest(dict(base=self.signature, variant='typed_grounded_v8',
+                                     operations=OPERATIONS))
+
+    def decorate_system(self, system):
+        original = system.respond
+        reviewed = False
+        self._native_context_was_shown = False
+
+        def respond(query):
+            nonlocal reviewed
+            schema_json = json.dumps(
+                query.response_schema.model_json_schema(), ensure_ascii=False)
+            schema_chars = len(schema_json)
+            marker = '\n\nPast experience:\n'
+            if schema_chars > 10000:
+                instruction = system.messages[0]['content']
+                if marker in instruction:
+                    system.messages[0]['content'] = instruction.split(marker, 1)[0]
+                    save(system.output / 'typed_context_budget.json', dict(
+                        decision='remove_past_context_for_large_action_schema',
+                        schema_chars=schema_chars, turn=system.turn + 1,
+                        previous_context_sha256=digest(instruction)))
+            elif '"tool_call"' in schema_json and marker in system.messages[0]['content']:
+                instruction, context = system.messages[0]['content'].split(marker, 1)
+                evidence = self.selected_public_context
+                if evidence and context.endswith(evidence):
+                    native = context[:-len(evidence)].rstrip()
+                    system.messages[0]['content'] = (instruction + marker + native
+                                                     if native else instruction)
+                    save(system.output / 'typed_context_budget.json', dict(
+                        decision='remove_unverified_event_context_for_tool_schema',
+                        schema_chars=schema_chars, turn=system.turn + 1,
+                        previous_context_sha256=digest(instruction + marker + context),
+                        native_context_retained=bool(native)))
+                    self._native_context_was_shown = bool(native)
+                else:
+                    self._native_context_was_shown = True
+            elif marker in system.messages[0]['content']:
+                self._native_context_was_shown = True
+            response = original(query)
+            actor_action = response.action.model_dump()
+            audit = dict(actor=actor_action, final=actor_action, operation='KEEP',
+                         reason=None, typed_candidate_kinds=[])
+            if 'tool_call' in actor_action:
+                audit['reason'] = 'Environment-changing tool action'
+            elif reviewed:
+                audit['reason'] = 'One-selection budget exhausted'
+            else:
+                candidates = typed_candidates(self.public_events, actor_action)
+                audit['typed_candidate_kinds'] = [c['kind'] for c in candidates]
+                if not candidates:
+                    audit['reason'] = 'No type-compatible historical candidate'
+                else:
+                    reviewed = True
+                    selection_labels = {
+                        f'APPLY_{index}': candidate
+                        for index, candidate in enumerate(candidates, start=1)
+                    }
+                    prior_starts = [event for event in self.public_events
+                                    if event['step'] == 1]
+                    current_start = (system.public_steps[0]['query']
+                                     if system.public_steps else query.prompt)
+                    messages = [dict(role='system', content=(
+                        'Select a general state operator for the current task. '
+                        'Prior submitted actions are unverified predictions, not '
+                        'ground truth; acknowledgments do not validate them. '
+                        'NUMERIC_CONSENSUS averages prior and current numerical '
+                        'vectors with identical field names to reduce variation '
+                        'across samples. Choose it when instances estimate the '
+                        'same underlying target fields from different samples. '
+                        'An already complete current vector can still benefit '
+                        'from consensus; field completeness is irrelevant. '
+                        'Do not choose it when each instance has a different '
+                        'underlying target. RECURRING_RECORDS appends prior '
+                        'record clusters absent from the current action. Choose '
+                        'it only when the task explicitly asks for a persistent '
+                        'set over time, including currently absent members. A '
+                        'list complete for the current observation may still '
+                        'omit persistent members. Repeated submitted records '
+                        'are fallible evidence of recurrence; do not demand '
+                        'that an acknowledgment has confirmed them. Compare '
+                        'the concrete candidate records with the current list '
+                        'and any contradictory public observations. '
+                        'Otherwise choose KEEP. Select only a label in '
+                        'allowed_operations. APPLY labels refer exactly to the '
+                        'listed candidates; do not name a candidate kind as the '
+                        'operation. Return exactly a JSON object with operation '
+                        'set to one allowed label and a short reason. Do not produce '
+                        'an action or invent evidence.')),
+                        dict(role='user', content=json.dumps(dict(
+                            current_task=query.prompt,
+                            episode_initial_task=_clip(self.client.tokenizer,
+                                                       current_start, 320),
+                            prior_episode_starts=[dict(source_sha256=e['source_sha256'],
+                                public_input=_clip(self.client.tokenizer,
+                                                   e['public_input'], 220))
+                                for e in prior_starts[-3:]],
+                            current_public_steps=public_value(system.public_steps[-3:]),
+                            actor_action=public_value(actor_action),
+                            allowed_operations=['KEEP', *selection_labels],
+                            candidate_summaries=[_candidate_summary(c, index)
+                                for index, c in enumerate(candidates, start=1)],
+                        ), ensure_ascii=False, allow_nan=False))]
+                    try:
+                        completion = self.client.complete(
+                            messages, seed(self.client.repeat, query.instance_id,
+                                           system.turn, 'typed_grounded_v8'),
+                            tokens=256, temperature=0., top_p=1.)
+                        system.calls += 1
+                        system.input_tokens += completion['input_tokens']
+                        system.output_tokens += completion['output_tokens']
+                        system.max_input_tokens = max(system.max_input_tokens,
+                                                      completion['input_tokens'])
+                        append(system.output / 'typed_selector.jsonl',
+                               dict(messages=messages, completion=completion))
+                        choice = _json_object(completion['raw_response'])
+                        operation = choice.get('operation')
+                        audit['selector_reason'] = choice.get('reason')
+                        if operation == 'KEEP':
+                            pass
+                        elif operation in selection_labels:
+                            candidate = selection_labels[operation]
+                            proposed = apply_candidate(actor_action, candidate,
+                                                       self.episode_count)
+                            action = query.response_schema.model_validate(proposed)
+                            if system.last is None:
+                                raise ValueError('Missing actor action')
+                            system.last = (system.last[0], action.model_dump())
+                            response = type(response)(action=action,
+                                                      metadata=response.metadata)
+                            audit.update(final=action.model_dump(),
+                                         operation=OPERATIONS[candidate['kind']],
+                                         candidate=candidate)
+                        else:
+                            raise ValueError('Unknown operator selection')
+                    except Exception as exc:
+                        audit['reason'] = 'Rejected selector or projection: ' + str(exc)
+            save(system.output / f'typed_action_{system.turn:03d}.json', audit)
+            return response
+
+        system.respond = respond
+
+    def update(self, query, public_trace, reward, success, retrieval, binding):
+        # Do not give Q credit to native memories that were removed before the
+        # first actor action in a large-schema instance.
+        if getattr(self, '_native_context_was_shown', True) is False:
+            retrieval = dict(retrieval, ids=[])
+        return super().update(query, public_trace, reward, success, retrieval,
+                              binding)

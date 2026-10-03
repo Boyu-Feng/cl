@@ -165,7 +165,7 @@ model that transfers beyond task-family keywords, and a genuinely unseen
 evaluation split before a generality claim.
 
 The disjoint-game ALFWorld `valid_seen` check has no game-file hash overlap
-with the 20260928 `valid_unseen` training plan. On all 13 look games, the same
+with the 20260928 `valid_unseen` evaluation plan. On all 13 look games, the same
 frozen gate **regressed**: first-attempt success 4/13 versus native 5/13
 (1 paired win, 2 losses), and within-three success 5/13 versus 7/13
 (1 win, 3 losses). All 26 cells completed; the gate suppressed 14 of 30
@@ -189,7 +189,8 @@ decision can affect later tasks. All 48 cells completed. The CLBench default
 Spectrum schedule uses a frozen corpus; changing its top-level task seed does
 not generate new instances.
 
-A small fixed-snapshot leave-one-out probe on training game
+A small fixed-snapshot leave-one-out probe on a development game from the
+canonical `valid_unseen` evaluation sequence,
 `look_at_obj_in_light/92601/episode_012` illustrates the next label source.
 With the same game and actor seed in a replay, both retrieved memories yield
 first-attempt reward 1, while dropping `memory_000022` yields 0. Both stored
@@ -198,6 +199,8 @@ gave both negative Q updates. The replay conflicts with those shared updates,
 but a single stochastic pair is noisy and must be repeated across games and
 seeds before training a utility estimator. The probe artifacts are under
 ignored `results/memrl_credit_diagnostic/20261001_paired_drop_train/`.
+Despite that historical directory name, these are not train-split games and
+must not become training labels for a purported untouched `valid_unseen` test.
 
 The same fixed snapshot with actor seeds 92601, 92602 and 92603 gives
 leave-one-out differences +1, 0 and 0 respectively. This one-memory example

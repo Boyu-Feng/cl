@@ -24,8 +24,8 @@ def memory_arms(origin: Path, case: str):
     index = int(episode_name.split('_')[1]) - 1
     retrieval = read(episode / ('retrieval_1.json' if benchmark == 'alfworld' else 'retrieval.json'))
     ids = retrieval['ids']
-    if len(ids) < 2:
-        raise ValueError(f'{case}: fewer than two injected memories')
+    if not ids:
+        raise ValueError(f'{case}: no injected memories')
     previous = episode.parent / f'episode_{index:03d}' / 'memory_after.json'
     snapshot = read(previous)
     entries = {mid: 'Task: ' + snapshot['items'][mid]['metadata']['task_description'] +
@@ -35,14 +35,34 @@ def memory_arms(origin: Path, case: str):
     full = context(ids)
     if full != retrieval['context'] or hashlib.sha256(full.encode()).hexdigest() != retrieval['context_sha256']:
         raise ValueError(f'{case}: reconstruction does not match frozen retrieval')
+    candidates = {item['memory_id']:item for item in retrieval['candidates']}
+    fields = ('success', 'official_reward', 'q_value', 'q_visits',
+              'reward_ma', 'last_reward', 'writer_token_limit_hit',
+              'input_binding', 'public_trace_sha256')
+    memory_features = {
+        mid: dict(metadata={key:snapshot['items'][mid]['metadata'].get(key) for key in fields},
+                  retrieval={key:candidates.get(mid, {}).get(key)
+                             for key in ('similarity', 'q_estimate', 'score')},
+                  text_characters=len(entries[mid]))
+        for mid in ids
+    }
     arms = {'full': full, 'none': ''}
     arms.update({f'only_{i}': context([mid]) for i, mid in enumerate(ids)})
     arms.update({f'drop_{i}': context([m for m in ids if m != mid]) for i, mid in enumerate(ids)})
     base = episode.parent.parent / 'none' / episode_name / 'row.json'
+    original_row = episode / 'row.json'
+    update = episode / ('update_1.json' if benchmark == 'alfworld' else 'update.json')
+    source_input_sha256 = read(original_row)['input_sha256'] if benchmark == 'alfworld' else read(original_row)['initial_query_sha256']
     return dict(benchmark=benchmark, task=task, repeat=int(repeat), index=index,
                 ids=ids, case=case, original_memrl=read(episode / 'row.json'),
-                original_none=read(base), original_update=read(episode / ('update_1.json' if benchmark == 'alfworld' else 'update.json')),
-                snapshot_sha256=sha(previous), retrieval_sha256=sha(episode / ('retrieval_1.json' if benchmark == 'alfworld' else 'retrieval.json'))), arms
+                original_none=read(base), original_update=read(update),
+                source_input_sha256=source_input_sha256,
+                memory_text_sha256={mid:hashlib.sha256(entries[mid].encode()).hexdigest() for mid in ids},
+                memory_features=memory_features,
+                arm_context_sha256={name:hashlib.sha256(context.encode()).hexdigest() for name,context in arms.items()},
+                original_memrl_row_sha256=sha(original_row), original_none_row_sha256=sha(base),
+                original_update_sha256=sha(update), snapshot_sha256=sha(previous),
+                retrieval_sha256=sha(episode / ('retrieval_1.json' if benchmark == 'alfworld' else 'retrieval.json'))), arms
 
 
 def run_alf(plan, client, spec, contexts, output):
@@ -128,20 +148,45 @@ def main():
     parser.add_argument('--paired-drop-index', type=int,
                         help='Replay only full context and one leave-one-out arm')
     parser.add_argument('--cl-sampling-repeats', type=int, nargs='+',
-                        help='Probe fixed CL memory with several actor sampling seeds; run four unique arms per seed')
+                        help='Probe fixed CL memory with several actor sampling seeds; run unique full, none and deletion arms')
+    parser.add_argument('--selection', type=Path,
+                        help='Frozen outcome-blind CL prefix case selection')
     parser.add_argument('--alf-actor-repeats', type=int, nargs='+',
                         help='Probe fixed ALFWorld memory with several paired actor seeds')
     parser.add_argument('cases', nargs='+', help='Paths relative to origin/runs')
     args = parser.parse_args()
     origin = args.origin.resolve(); output = args.output.resolve()
     plan = read(origin / 'plan.json')
+    selected = None
+    if args.selection:
+        if not args.cl_sampling_repeats:
+            raise ValueError('Frozen CL selection requires --cl-sampling-repeats')
+        selection_path = args.selection.resolve()
+        selected = read(selection_path)
+        if (selected['origin'] != str(origin) or
+                selected['origin_plan_sha256'] != sha(origin / 'plan.json') or
+                selected['actor_repeats'] != args.cl_sampling_repeats or
+                [item['case'] for item in selected['cases']] != args.cases):
+            raise ValueError('Probe request differs from frozen CL selection')
     plan['url'] = args.url; plan['alf']['actor_url'] = args.url
     output.mkdir(parents=True, exist_ok=True)
+    execution_freeze = None
+    if selected is not None:
+        freeze_path = output / 'execution_freeze.json'
+        execution_freeze = read(freeze_path)
+        root = Path(__file__).parents[2]
+        for name, expected in execution_freeze['files'].items():
+            if sha(root / name) != expected or sha(output / 'source' / name) != expected:
+                raise ValueError(f'CL probe execution source changed: {name}')
     manifest = dict(origin=str(origin), origin_plan_sha256=sha(origin / 'plan.json'),
                     cases=args.cases, url=args.url,
                     note='Exploratory fixed-memory text ablation; no Q-value update or online policy replay')
     if args.cl_sampling_repeats:
         manifest['cl_sampling_repeats'] = args.cl_sampling_repeats
+    if selected is not None:
+        manifest['selection_path'] = str(selection_path)
+        manifest['selection_sha256'] = sha(selection_path)
+        manifest['execution_freeze_sha256'] = sha(freeze_path)
     if args.alf_actor_repeats:
         if args.cl_sampling_repeats:
             raise ValueError('Choose one actor-repeat mode')
@@ -155,6 +200,14 @@ def main():
     save(output / 'design.json', manifest)
     for case in args.cases:
         spec, arms = memory_arms(origin, case)
+        if selected is not None:
+            item = next(item for item in selected['cases'] if item['case'] == case)
+            if (item['memory_ids'] != spec['ids'] or
+                    item['source_input_sha256'] != spec['source_input_sha256'] or
+                    item['snapshot_sha256'] != spec['snapshot_sha256'] or
+                    item['retrieval_sha256'] != spec['retrieval_sha256'] or
+                    item['source_row_sha256'] != spec['original_memrl_row_sha256']):
+                raise ValueError(f'Frozen CL source changed: {case}')
         if args.paired_drop_index is not None:
             index = args.paired_drop_index
             if index < 0 or index >= len(spec['ids']):
@@ -162,7 +215,10 @@ def main():
             arms = {'full': arms['full'], f'drop_{index}': arms[f'drop_{index}']}
         folder = output / spec['benchmark'] / spec['task'] / str(spec['repeat']) / f"episode_{spec['index']+1:03d}"
         folder.mkdir(parents=True, exist_ok=True)
-        save(folder / 'source.json', {k:v for k,v in spec.items() if k not in {'original_memrl','original_none','original_update'}})
+        source = {k:v for k,v in spec.items() if k not in {'original_memrl','original_none','original_update'}}
+        if (folder / 'source.json').exists() and read(folder / 'source.json') != source:
+            raise ValueError(f'Existing diagnostic source differs: {case}')
+        save(folder / 'source.json', source)
         if args.validate_only:
             print('validated', case, 'ids', spec['ids'], flush=True)
             continue
@@ -180,9 +236,12 @@ def main():
                                       replay=result), ensure_ascii=False), flush=True)
             continue
         if args.cl_sampling_repeats:
-            if spec['benchmark'] != 'clbench' or len(spec['ids']) != 2:
-                raise ValueError('Sampling-repeat probe requires a two-memory CLBench case')
-            unique = {name:arms[name] for name in ('full','none','drop_0','drop_1')}
+            if spec['benchmark'] != 'clbench':
+                raise ValueError('Sampling-repeat probe requires a CLBench case')
+            names = ['full', 'none']
+            if len(spec['ids']) > 1:
+                names.extend(f'drop_{i}' for i in range(len(spec['ids'])))
+            unique = {name:arms[name] for name in names}
             for actor_repeat in args.cl_sampling_repeats:
                 client = Client(plan, actor_repeat)
                 result = run_cl(plan, client, spec, unique, folder / f'actor_repeat_{actor_repeat}')
