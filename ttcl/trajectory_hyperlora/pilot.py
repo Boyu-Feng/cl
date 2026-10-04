@@ -75,7 +75,7 @@ class TrajectoryHyperLoRA(nn.Module):
         if encoder_kind == "gru":
             self.encoder = nn.GRU(model.config.hidden_size, 96, batch_first=True)
             self.projection = nn.Linear(96, experts)
-        elif encoder_kind == "attention":
+        elif encoder_kind in ("attention", "frozen_lm"):
             self.encoder = nn.Sequential(
                 nn.LayerNorm(model.config.hidden_size),
                 nn.Linear(model.config.hidden_size, 128),
@@ -98,7 +98,11 @@ class TrajectoryHyperLoRA(nn.Module):
 
     def encode(self, source_ids: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            embeddings = self.model.get_input_embeddings()(source_ids).float()
+            if self.encoder_kind == "frozen_lm":
+                embeddings = self.model.model(input_ids=source_ids,
+                                               use_cache=False).last_hidden_state.float()
+            else:
+                embeddings = self.model.get_input_embeddings()(source_ids).float()
         if self.encoder_kind == "gru":
             _, hidden = self.encoder(embeddings)
             pooled = hidden[-1]
@@ -328,7 +332,8 @@ def main() -> None:
     parser.add_argument("--rank", type=int, default=4)
     parser.add_argument("--experts", type=int, default=4)
     parser.add_argument("--layers", type=int, default=2)
-    parser.add_argument("--encoder", choices=("gru", "attention"), default="attention")
+    parser.add_argument("--encoder", choices=("gru", "attention", "frozen_lm"),
+                        default="attention")
     parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--test-set", choices=("original", "fresh", "distractor", "combined"),
                         default="original")
