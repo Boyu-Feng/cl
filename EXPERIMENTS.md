@@ -6237,3 +6237,9 @@ Mem0 机制分析脚本为 `ttcl.icl_mem0_comparison.analyze`，每次写入新�
 方法、论文关系、初步数据审计与后续训练条件见 `ttcl/trajectory_hyperlora/TRAJECTORY_TO_LORA_RESEARCH_20261005.md`。复核上段 7/8 后发现两个种子均是：规则 0 从基模 0/4 提升到 LoRA 3/4，规则 1 基模已为 4/4，LoRA 仍为 4/4。因此不能把总分解释为两种规则都提高。新效用函数以同一后续任务的候选 LoRA 减无 LoRA 奖励为主，惩罚负迁移；错配轨迹只作诊断，不计入主奖励。它拒绝缺失、非有限及重复的配对反馈，随机潜变量的策略梯度作用于生成器而非旧轨迹每个动作。
 
 现存冻结 ALFWorld train 计划的 144 个游戏与 36 个评测游戏无交集。训练日志中审计出 96 个相邻任务候选对，源任务成功 22、失败 74；仅作为内容哈希绑定的候选，不复用旧监督标签，也不把历史后续任务奖励冒充新 LoRA 的配对奖励。代码为 `ttcl/trajectory_hyperlora/{paired_utility,audit_alf_pairs}.py`，审计原始输出在 ignored `results/trajectory_hyperlora/alf_train_pair_audit.json`。本轮完成了数据／目标函数审计，尚未训练生成器或 RL，也未取得新 ALFWorld／CLBench 分数。
+
+## 2026-10-05：逐步观察—动作关系编码的 LoRA 生成验证
+
+完整协议、消融和限制见 `ttcl/trajectory_hyperlora/RELATIONAL_LORA_PILOT_20261005.md`。冻结 Qwen3-4B 与两条先前成功轨迹拟合的 rank-4 LoRA 基底，仅训练共享轨迹编码器，让其从每步观察、动作、反馈的关系中生成 LoRA 混合系数。先前整段／逐步但不中心化的编码器在新读数测试均为 8/16，错配也是 8/16；去掉同一轨迹的字段均值后，两个训练种子均为正确生成 LoRA 14/16、错配 2/16、基模 8/16，达到固定专家库的 14/16 上限。若训练历史只含成功动作，先做错再纠正的测试历史降至 10/16；以 50% 概率加入拒绝→纠正训练历史后，两个种子的干净／纠错历史都为 14/16。
+
+独立进程重载生成器，用新的源数字、源记录与反馈措辞以及新读数测试：两个种子在干净／纠错历史上均为正确生成 LoRA 16/16、错配 0/16、基模 8/16；两种子共享同一固定专家库和测试集，结果为探索性小样本。一个生成 LoRA 已导出为标准 PEFT rank-8 adapter，独立重载后四个新读数的输出与内存版逐字相同且 4/4 正确。原始逐题输出、生成器及 adapter 权重保存在 ignored `results/trajectory_hyperlora/relational_router_20261005/`；Git 只保存代码、测试及此结果摘要。尚未从任意新轨迹生成专家库之外的参数经验，也没有 ALFWorld／CLBench 或 RL 成绩。训练只用 GPU 0、单进程显存上限 40%，未动其他 GPU 实验。
