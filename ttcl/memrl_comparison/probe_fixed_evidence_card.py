@@ -61,6 +61,9 @@ def run(origin, source_root, output, domain, repeats, indices, url):
     target_bindings = {str(repeat): {str(index): read(origin / 'runs' / 'clbench' /
         domain / str(repeat) / 'none' / f'episode_{index+1:03d}' / 'row.json')[
             'initial_query_sha256'] for index in indices} for repeat in repeats}
+    if any(value == card['source_binding']['initial_query_sha256']
+           for per_repeat in target_bindings.values() for value in per_repeat.values()):
+        raise ValueError('A target repeats the source input content; choose distinct targets')
     snapshots = {str(repeat): source_root.parent /
         source_root.name.replace('pilot_v3', f'repeat{repeat}_v3') /
         'memrl' / 'episode_001' / 'memory_after.json' for repeat in repeats}

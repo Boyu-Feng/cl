@@ -60,6 +60,8 @@ def audit(root):
                 raise ValueError('Pair differs by more than the fixed card at retrieval')
             details.append(dict(repeat=repeat, canonical_index=index,
                 input_sha256=base['row']['initial_query_sha256'],
+                source_input_equal_target=(base['row']['initial_query_sha256'] ==
+                                           card['source_binding']['initial_query_sha256']),
                 without_card_reward=base['row']['reward'],
                 with_card_reward=candidate['row']['reward'],
                 delta=candidate['row']['reward']-base['row']['reward'],
