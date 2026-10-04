@@ -52,13 +52,22 @@ def load_agent(model_path: Path, checkpoint_path: Path, device: str,
     if checkpoint["source_encoder"] != "raw":
         raise ValueError("ALFWorld probe needs a raw-trajectory encoder checkpoint")
     agent = DirectRelationHyperLoRA(model, rank=checkpoint["rank"],
-                                    layers=checkpoint["layers"]).to(device)
+                                    layers=checkpoint["layers"],
+                                    encoder_kind=checkpoint.get(
+                                        "encoder_kind", "covariance"),
+                                    relation_bottleneck=checkpoint.get(
+                                        "relation_bottleneck", "none")).to(device)
+    agent.model.generation_config.temperature = 1.0
+    agent.model.generation_config.top_p = 1.0
+    agent.model.generation_config.top_k = 50
     trainable = {name: param for name, param in agent.named_parameters()
                  if param.requires_grad}
-    if set(trainable) != set(checkpoint["trainable_state"]):
+    learned_state = dict(checkpoint["trainable_state"])
+    learned_state.update(checkpoint.get("relation_state", {}))
+    if set(trainable) != set(learned_state):
         raise ValueError("Checkpoint parameter names mismatch")
     for name, param in trainable.items():
-        value = checkpoint["trainable_state"][name]
+        value = learned_state[name]
         if value.shape != param.shape:
             raise ValueError(f"Checkpoint shape mismatch: {name}")
         param.data.copy_(value.to(device))
@@ -67,21 +76,50 @@ def load_agent(model_path: Path, checkpoint_path: Path, device: str,
 
 
 def generate(agent, tokenizer, messages: list[dict], device: str,
-             max_new_tokens: int) -> str:
+             max_new_tokens: int,
+             admissible_commands: list[str] | None = None) -> str:
     content = tokenizer.apply_chat_template(messages, tokenize=False,
                                             add_generation_prompt=True)
     inputs = tokenizer(content, return_tensors="pt").to(device)
+    constraint = None
+    if admissible_commands is not None:
+        prefix = inputs.input_ids[0].tolist()
+        paths = []
+        for command in sorted(set(admissible_commands)):
+            full = tokenizer(content + command,
+                             add_special_tokens=False).input_ids
+            if full[:len(prefix)] != prefix:
+                raise ValueError("Command tokenization changes the actor prefix")
+            continuation = tuple(full[len(prefix):])
+            if not continuation or len(continuation) + 1 > max_new_tokens:
+                raise ValueError("Admissible command exceeds token budget")
+            paths.append(continuation)
+        if not paths:
+            raise ValueError("Environment supplied no admissible commands")
+
+        def constraint(_batch_index: int, generated_ids: torch.Tensor) -> list[int]:
+            suffix = tuple(generated_ids[len(prefix):].tolist())
+            allowed = {path[len(suffix)] for path in paths
+                       if len(path) > len(suffix) and path[:len(suffix)] == suffix}
+            if any(path == suffix for path in paths):
+                allowed.add(tokenizer.eos_token_id)
+            if not allowed:
+                raise ValueError("Generated tokens escaped admissible command trie")
+            return sorted(allowed)
+
     with torch.no_grad():
         output = agent.model.generate(**inputs, do_sample=False,
                                       max_new_tokens=max_new_tokens,
-                                      pad_token_id=tokenizer.eos_token_id)
+                                      pad_token_id=tokenizer.eos_token_id,
+                                      prefix_allowed_tokens_fn=constraint)
     return tokenizer.decode(output[0, inputs.input_ids.shape[1]:],
                             skip_special_tokens=True).strip()
 
 
 def run_episode(agent, tokenizer, game: Path, fields: dict,
                 *, adapter: bool, device: str, max_steps: int,
-                max_new_tokens: int) -> dict:
+                max_new_tokens: int,
+                constrain_actions: bool = False) -> dict:
     with torch.no_grad():
         agent.set_source(fields if adapter else None)
     env = make_env(game)
@@ -95,7 +133,8 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
             available = list(state["admissible_commands"])
             messages.append({"role": "user", "content": str(state["feedback"]) +
                              "\nAvailable commands:\n" + "\n".join(available)})
-            response = generate(agent, tokenizer, messages, device, max_new_tokens)
+            response = generate(agent, tokenizer, messages, device, max_new_tokens,
+                                available if constrain_actions else None)
             command = clean_command(response, available)
             valid = command in available
             state, _, done = env.step(command)
