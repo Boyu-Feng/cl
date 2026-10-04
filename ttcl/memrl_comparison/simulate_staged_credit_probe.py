@@ -89,7 +89,7 @@ def simulate(outputs: list[Path]) -> dict:
                             actor_calls_saved=sum(c['actor_calls_saved'] for c in cases),
                             actor_calls_full=sum(c['actor_calls_full'] for c in cases)),
                 cases=cases,
-                caveat='Full probes are retained for independent audit; saved calls are a counterfactual budget estimate, not actual skipped computation')
+                caveat='Full probes are retained for independent audit; saved calls are a counterfactual budget estimate, not actual skipped computation. An adaptive run would move full_repeat earlier than the frozen full-probe arm order, which may alter model sampling and needs direct validation')
 
 
 def main() -> None:
