@@ -2,7 +2,7 @@
 
 ## 结论
 
-方向在技术上可行，也有相近论文实证；但本仓库首轮小型原型**尚未证明收益**。冻结 Qwen3-4B 后，轨迹条件化的低秩参数更新确实可以挂载并改变回答；在未见过的轨迹措辞上，生成适配器只答对 2/8，打乱轨迹对照分别是 2/8 和 4/8。直接把轨迹放进上下文为 8/8。这个受控颜色任务仅检验信息能否从完整轨迹转移到权重，不是 ALFWorld 或 CLBench 分数，也未训练 RL。
+方向在技术上可行，也有相近论文实证。本仓库的受控实验发现：直接训练轨迹→LoRA 不稳定；先用轨迹中已发生的回答 token 预热编码器，再训练生成 LoRA，冻结 Qwen3-4B 在**新措辞**的后续同类查询上两种子均为 8/8，无记忆与错配轨迹均为 0/8。这证明小型场景中信息可经 LoRA 挂载并改善回答。但轨迹包含“先答错、再纠正”的多步反馈时，两种子只为 2/8、4/8，信用分配仍未解决。它是受控颜色任务，不是 ALFWorld 或 CLBench 分数，也未训练 RL。
 
 ## 相关工作与真正的差别
 
@@ -35,26 +35,39 @@ W'_\ell=W_\ell+g(x,\tau)\frac{\alpha}{r}B_\ell A_\ell.
 
 ## 已完成的最小实验
 
-代码：[pilot.py](pilot.py)、[test_pilot.py](test_pilot.py)。底座为本地 Qwen3-4B-Instruct-2507，冻结全部原参数；轨迹编码器读取 tokenizer 后的**完整原始轨迹**，没有人工动作类别或文本经验总结。原型先生成四个共享 rank-4 LoRA 基底的混合系数，在最后两层 `mlp.down_proj` 形成轨迹专属低秩更新。这是受限的 hypernetwork，**不是** Text-to-LoRA 论文那种逐层直接预测完整 A/B 的实现。训练目标是后续独立查询的回答 token 交叉熵；四种颜色作为受控隐藏约定，训练用四种轨迹措辞，测试用两种未见过的措辞。每个颜色两题，共 8 题。测试时 LoRA 组的 query 不含原轨迹。
+代码：[pilot.py](pilot.py)、[test_pilot.py](test_pilot.py)。底座为本地 Qwen3-4B-Instruct-2507，冻结全部原参数；轨迹编码器读取 tokenizer 后的**完整原始轨迹**，没有人工动作类别或文本经验总结。原型先生成四个共享 rank-4 LoRA 基底的混合系数，在最后两层 `mlp.down_proj` 形成轨迹专属低秩更新。这是受限的 hypernetwork，**不是** Text-to-LoRA 论文那种逐层直接预测完整 A/B 的实现。四种颜色是受控隐藏约定。训练用四种轨迹措辞，原测试和新测试各用两种未见措辞，每组每色两题，共 8 题。测试时 LoRA 组的 query 不含原轨迹。预热阶段仅预测源轨迹里已发生的回答 token；之后用独立查询的回答 token 交叉熵训练 LoRA 生成路径。预热仍是监督学习，不是 RL。
 
 | 探索运行 | 训练步 | 无记忆 | 轨迹文本 | 生成 LoRA | 错配轨迹 LoRA |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | GRU 编码器 | 80 | 0/8 | 8/8 | 2/8 | 2/8 |
 | 注意力池化编码器 | 400 | 0/8 | 8/8 | 2/8 | 4/8 |
 
-第二次运行是在看到第一次结果后改编码器，且重复使用同一小测试集，所以它是探索性诊断，不是独立确认。两次的训练 loss 均下降，但这不能替代未见措辞的准确率；错配轨迹有时更高，说明当前生成器并未可靠地把轨迹中的约定映射到权重。可能的原因包括训练情景太少、只改最后两层和共享基底表达能力不足；本实验不能分离这些因素。没有理由基于这两个结果启动高成本 RL 或宣称真实 benchmark 提升。
+第二次运行是在看到第一次结果后改编码器，且重复使用同一小测试集，所以它是探索性诊断。两次的训练 loss 均下降，但这不能替代未见措辞的准确率；错配轨迹有时更高。进一步的单独读出诊断显示编码器可从未见措辞中识别源回答 8/8，因此增加**通用回答 token 重建预热**来增强参数通路，而不是添加手工动作类别。
 
-运行数据保存在忽略上传的 `results/trajectory_hyperlora/pilot_20261004/{metrics,attention_400}.json`；表中摘要随代码提交。两项 CPU 检查验证关闭适配器时输出逐位等于底座，以及不同潜变量产生不同输出且梯度流回生成系数。两次训练仅使用 GPU 0，进程显存上限设为该卡的 40%，没有停止或改动其他实验。底座配置 SHA-256 为 `5beea1a4a34c62782bfb2f911c606741a3bab8f92d80a118fa053c28af12e8ba`，权重索引 SHA-256 为 `d6c42883a895dfef5b0080ed2116a1bcd764f558406b98923d675978a1abf29c`，三份权重分片的 SHA-256 分别为 `75311d91bb08cf0b882913da464a1e722a31fb44db35208663487efb7a3d8ed6`、`0b48adbb1f60e901153d91907ba11ce63bd4b8b584482e730f48808d055dfba1`、`7dd39ccca5e4de123c74c14af44c9bf2eb75df33b4614382af0134528e060d5d`。本实验未保存或提交模型权重。
+| 预热 200 步 + LoRA 训练 400 步 | 无记忆 | 轨迹文本 | 生成 LoRA | 错配轨迹 LoRA |
+| --- | ---: | ---: | ---: | ---: |
+| 种子 42：原测试措辞 | 0/8 | 8/8 | 8/8 | 0/8 |
+| 种子 42：新测试措辞 | 0/8 | 8/8 | 8/8 | 0/8 |
+| 种子 43：新测试措辞 | 0/8 | 8/8 | 8/8 | 0/8 |
+| 种子 42：含错误尝试、纠正和反馈 | 0/8 | 8/8 | 2/8 | 0/8 |
+| 种子 43：含错误尝试、纠正和反馈 | 0/8 | 8/8 | 4/8 | 0/8 |
+
+种子 42 的第一次预热运行只测原措辞；随后用两个种子评估完整三组，每组 8 题。新措辞组在看到结果前固定；原措辞组已用于开发，不能当独立确认。预热直接从源轨迹中学习“什么回答出现过”，因此单步测试的信息转移难度较低；多步组暴露了模型尚未稳定区分被拒绝与被接受回答。文本轨迹组 8/8，也说明当前 LoRA 没有超过等信息量的文本基线。小样本和同一组合成任务族不能外推到真实环境。
+
+运行数据保存在忽略上传的 `results/trajectory_hyperlora/pilot_20261004/`；表中摘要随代码提交。两项 CPU 检查验证关闭适配器时输出逐位等于底座，以及不同潜变量产生不同输出且梯度流回生成系数。种子 43 的超网络参数保存为本地 `seed43_hypernetwork.pt`，第 0 条测试轨迹生成的标准 PEFT LoRA 保存为本地 `generated_adapter_case_0/`；独立进程用 `PeftModel.from_pretrained` 挂载后答出 `amber`，与自定义适配器输出一致。**所有权重均在 Git 忽略目录，不上传。**所有训练仅使用 GPU 0，进程显存上限设为该卡的 40%，没有停止或改动其他实验。底座配置 SHA-256 为 `5beea1a4a34c62782bfb2f911c606741a3bab8f92d80a118fa053c28af12e8ba`，权重索引 SHA-256 为 `d6c42883a895dfef5b0080ed2116a1bcd764f558406b98923d675978a1abf29c`，三份权重分片的 SHA-256 分别为 `75311d91bb08cf0b882913da464a1e722a31fb44db35208663487efb7a3d8ed6`、`0b48adbb1f60e901153d91907ba11ce63bd4b8b584482e730f48808d055dfba1`、`7dd39ccca5e4de123c74c14af44c9bf2eb75df33b4614382af0134528e060d5d`。
 
 重跑命令（主线 Python 环境）：
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 ttcl/.runtime/alf_delta_env/bin/python \
   -m ttcl.trajectory_hyperlora.pilot \
-  --device cuda:0 --gpu-fraction 0.40 --steps 400 \
-  --output results/trajectory_hyperlora/pilot_20261004/attention_400.json
+  --device cuda:0 --gpu-fraction 0.40 --seed 43 \
+  --warmup-steps 200 --steps 400 --test-set combined \
+  --checkpoint-path results/trajectory_hyperlora/pilot_20261004/seed43_hypernetwork.pt \
+  --export-case 0 \
+  --output results/trajectory_hyperlora/pilot_20261004/seed43_export.json
 ```
 
-80 步版本将命令中的 `--steps 400` 改为 `--steps 80 --encoder gru`，输出路径改为 `metrics.json`。
+原始 80 步版本将命令中的 `--warmup-steps 200 --steps 400 --test-set combined` 改为 `--warmup-steps 0 --steps 80 --encoder gru --test-set original`，并使用种子 42；原始 400 步版关闭预热并只测原措辞。独立加载导出的 LoRA 可调用 `PeftModel.from_pretrained(base_model, "results/trajectory_hyperlora/pilot_20261004/generated_adapter_case_0")`。`results/` 未纳入 Git，模型和生成器权重也未提交。
 
-下一步先扩大训练任务的轨迹与查询多样性，并实现逐层直接输出 A/B 的小 rank 版本；独立保留新的测试模板。只有在错配轨迹消融明显变差、生成 LoRA 稳定超过无记忆基线之后，才进入真实 ALFWorld／CLBench 配对奖励的 RL 阶段。
+下一步应把预热目标改为完整轨迹的多动作重建与公开反馈预测，同时扩大训练任务／轨迹／查询多样性，并实现逐层直接输出 A/B 的小 rank 版本。随后用相同任务、相同采样种子的实际使用／不使用 LoRA 差值训练随机生成器，优先解决“错误尝试→纠正”轨迹的信用分配。进入真实 ALFWorld／CLBench 之前，需用新的任务族和独立测试集验证，不能依据当前颜色任务宣称真实 benchmark 提升。

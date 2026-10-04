@@ -16,6 +16,8 @@ from pathlib import Path
 import torch
 from torch import nn
 from torch.nn import functional as F
+from peft import LoraConfig, TaskType
+from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
@@ -29,6 +31,14 @@ TRAIN_TEMPLATES = (
 TEST_TEMPLATES = (
     "Finished interaction {episode}: the assistant responded with {color} to the color request and received success feedback.",
     "Completed trial {episode}: the answer to the convention-color question was {color}; the judge accepted the answer.",
+)
+FRESH_TEMPLATES = (
+    "Archived episode {episode} ended after the assistant gave {color} as the session color. The response passed validation.",
+    "A previous run, numbered {episode}, received a request for the conventional color. Its final response was {color}, and the task succeeded.",
+)
+DISTRACTOR_TEMPLATES = (
+    "Run {episode}: the agent tried {other} and got rejected; it then replied {color} and the environment accepted the response.",
+    "History {episode}: first answer {other}, feedback incorrect. Revised answer {color}, feedback correct. The episode ended.",
 )
 QUERY = "What is the color convention established in the previous completed episode? Reply with exactly one color word."
 
@@ -55,7 +65,8 @@ class ConditionalLoRALinear(nn.Module):
 
 class TrajectoryHyperLoRA(nn.Module):
     def __init__(self, model: nn.Module, experts: int = 4, rank: int = 4,
-                 layers: int = 2, encoder_kind: str = "attention") -> None:
+                 layers: int = 2, encoder_kind: str = "attention",
+                 pretrain_tokens: bool = False) -> None:
         super().__init__()
         self.model = model
         for parameter in model.parameters():
@@ -74,6 +85,11 @@ class TrajectoryHyperLoRA(nn.Module):
             self.projection = nn.Linear(128, experts)
         else:
             raise ValueError(f"Unknown encoder: {encoder_kind}")
+        self.reconstruction_head = (
+            nn.Linear(96 if encoder_kind == "gru" else 128, model.config.hidden_size)
+            if pretrain_tokens else None
+        )
+        self.source_features: torch.Tensor | None = None
         self.adapters = nn.ModuleList()
         for block in model.model.layers[-layers:]:
             adapter = ConditionalLoRALinear(block.mlp.down_proj, experts, rank)
@@ -90,7 +106,16 @@ class TrajectoryHyperLoRA(nn.Module):
             states = self.encoder(embeddings)
             weights = torch.softmax(self.token_attention(states), dim=1)
             pooled = (weights * states).sum(dim=1)
+        self.source_features = pooled
         return torch.softmax(self.projection(pooled), dim=-1)
+
+    def reconstruction_loss(self, token_id: int) -> torch.Tensor:
+        if self.reconstruction_head is None or self.source_features is None:
+            raise RuntimeError("Source reconstruction was not enabled")
+        vector = self.reconstruction_head(self.source_features)
+        logits = self.model.lm_head(vector.to(self.model.lm_head.weight.dtype)).float()
+        target = torch.tensor([token_id], device=logits.device)
+        return F.cross_entropy(logits, target)
 
     def set_source(self, source_ids: torch.Tensor | None) -> None:
         coefficients = self.encode(source_ids) if source_ids is not None else None
@@ -100,6 +125,7 @@ class TrajectoryHyperLoRA(nn.Module):
     def clear(self) -> None:
         for adapter in self.adapters:
             adapter.coefficients = None
+        self.source_features = None
 
 
 def prompt(tokenizer: object, query: str, history: str | None = None) -> str:
@@ -109,15 +135,16 @@ def prompt(tokenizer: object, query: str, history: str | None = None) -> str:
     )
 
 
-def example(template: str, color: str, episode: int) -> str:
-    return template.format(episode=episode, color=color)
+def example(template: str, color: str, episode: int, other: str = "") -> str:
+    return template.format(episode=episode, color=color, other=other)
 
 
 def evaluate(agent: TrajectoryHyperLoRA, tokenizer: object, cases: list[dict], device: str) -> dict:
     agent.eval()
     rows = []
     for case in cases:
-        row = {"label": case["color"], "source_hash": hashlib.sha256(case["source"].encode()).hexdigest()}
+        row = {"label": case["color"], "group": case.get("group", "original"),
+               "source_hash": hashlib.sha256(case["source"].encode()).hexdigest()}
         for arm in ("base", "text", "hyper", "shuffled"):
             history = case["source"] if arm == "text" else None
             source = case["source"] if arm == "hyper" else case["shuffled"] if arm == "shuffled" else None
@@ -131,8 +158,57 @@ def evaluate(agent: TrajectoryHyperLoRA, tokenizer: object, cases: list[dict], d
             row[arm] = {"answer": answer, "correct": first == case["color"]}
         agent.clear()
         rows.append(row)
-    return {"n": len(rows), "accuracy": {arm: sum(row[arm]["correct"] for row in rows) / len(rows)
-                                      for arm in ("base", "text", "hyper", "shuffled")}, "rows": rows}
+    arms = ("base", "text", "hyper", "shuffled")
+    groups = sorted({row["group"] for row in rows})
+    return {"n": len(rows),
+            "accuracy": {arm: sum(row[arm]["correct"] for row in rows) / len(rows) for arm in arms},
+            "group_accuracy": {
+                group: {arm: sum(row[arm]["correct"] for row in rows if row["group"] == group)
+                        / sum(row["group"] == group for row in rows) for arm in arms}
+                for group in groups
+            }, "rows": rows}
+
+
+def export_peft_lora(agent: TrajectoryHyperLoRA, tokenizer: object, source: str,
+                     output_dir: Path, model_path: str, device: str) -> dict:
+    """Materialize one generated update as a standard PEFT LoRA adapter."""
+    agent.eval()
+    source_ids = tokenizer(source, return_tensors="pt").input_ids.to(device)
+    with torch.no_grad():
+        agent.set_source(source_ids)
+        coefficients = agent.adapters[0].coefficients[0].detach().float().cpu()
+    rank = agent.adapters[0].a.shape[1]
+    experts = len(coefficients)
+    total_rank = rank * experts
+    last_layer = len(agent.model.model.layers) - len(agent.adapters)
+    targets = []
+    tensors = {}
+    for offset, adapter in enumerate(agent.adapters):
+        layer_index = last_layer + offset
+        name = f"model.layers.{layer_index}.mlp.down_proj"
+        targets.append(name)
+        a = adapter.a.detach().float().cpu().reshape(total_rank, -1).contiguous()
+        b = (adapter.b.detach().float().cpu()
+             * coefficients[:, None, None] / rank)
+        b = b.permute(1, 0, 2).reshape(adapter.b.shape[1], total_rank).contiguous()
+        prefix = f"base_model.model.{name}"
+        tensors[f"{prefix}.lora_A.weight"] = a
+        tensors[f"{prefix}.lora_B.weight"] = b
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config = LoraConfig(
+        r=total_rank, lora_alpha=total_rank, lora_dropout=0.0,
+        target_modules=targets, bias="none", task_type=TaskType.CAUSAL_LM,
+        inference_mode=True, base_model_name_or_path=str(Path(model_path).resolve()),
+    )
+    config.save_pretrained(output_dir)
+    save_file(tensors, output_dir / "adapter_model.safetensors")
+    manifest = {"source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+                "base_model": str(Path(model_path).resolve()),
+                "targets": targets, "rank": total_rank,
+                "coefficient_values": coefficients.tolist()}
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    agent.clear()
+    return manifest
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -150,8 +226,26 @@ def run(args: argparse.Namespace) -> dict:
     model.generation_config.top_p = 1.0
     model.generation_config.top_k = 50
     agent = TrajectoryHyperLoRA(model, experts=args.experts, rank=args.rank,
-                                layers=args.layers, encoder_kind=args.encoder).to(args.device)
+                                layers=args.layers, encoder_kind=args.encoder,
+                                pretrain_tokens=args.warmup_steps > 0).to(args.device)
     optimizer = torch.optim.AdamW((p for p in agent.parameters() if p.requires_grad), lr=args.lr)
+    warmup_losses = []
+    for step in range(args.warmup_steps):
+        color = COLORS[step % len(COLORS)]
+        source = example(rng.choice(TRAIN_TEMPLATES), color, step)
+        source_ids = tokenizer(source, return_tensors="pt").input_ids.to(args.device)
+        agent.set_source(source_ids)
+        target_token = tokenizer(" " + color, add_special_tokens=False).input_ids[0]
+        loss = agent.reconstruction_loss(target_token)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_((p for p in agent.parameters() if p.requires_grad), 1.0)
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+        agent.clear()
+        warmup_losses.append(float(loss.detach()))
+        if (step + 1) % 50 == 0:
+            print(json.dumps({"warmup_step": step + 1,
+                              "loss": sum(warmup_losses[-50:]) / 50}), flush=True)
     losses = []
     for step in range(args.steps):
         color = COLORS[step % len(COLORS)]
@@ -172,16 +266,29 @@ def run(args: argparse.Namespace) -> dict:
         losses.append(float(loss.detach()))
         if (step + 1) % 10 == 0:
             print(json.dumps({"step": step + 1, "loss": sum(losses[-10:]) / 10}), flush=True)
+    template_groups = {
+        "original": TEST_TEMPLATES,
+        "fresh": FRESH_TEMPLATES,
+        "distractor": DISTRACTOR_TEMPLATES,
+    }
+    selected_groups = tuple(template_groups) if args.test_set == "combined" else (args.test_set,)
     cases = []
-    for color in COLORS:
-        for index, template in enumerate(TEST_TEMPLATES):
-            source = example(template, color, 1000 + index)
-            other = COLORS[(COLORS.index(color) + 1) % len(COLORS)]
-            cases.append({"color": color, "source": source,
-                          "shuffled": example(template, other, 1000 + index)})
+    for group in selected_groups:
+        for color in COLORS:
+            for index, template in enumerate(template_groups[group]):
+                other = COLORS[(COLORS.index(color) + 1) % len(COLORS)]
+                source = example(template, color, 1000 + index, other=other)
+                shuffled_other = COLORS[(COLORS.index(other) + 1) % len(COLORS)]
+                cases.append({"color": color, "group": group, "source": source,
+                              "shuffled": example(template, other, 1000 + index,
+                                                  other=shuffled_other)})
     metrics = evaluate(agent, tokenizer, cases, args.device)
     metrics.update({"model": args.model, "seed": args.seed, "steps": args.steps,
                     "encoder": args.encoder,
+                    "test_set": args.test_set,
+                    "warmup_steps": args.warmup_steps,
+                    "warmup_loss_last_10": sum(warmup_losses[-10:]) / min(10, len(warmup_losses))
+                    if warmup_losses else None,
                     "rank": args.rank, "experts": args.experts, "layers": args.layers,
                     "loss_first_10": sum(losses[:10]) / min(10, len(losses)),
                     "loss_last_10": sum(losses[-10:]) / min(10, len(losses)),
@@ -189,6 +296,23 @@ def run(args: argparse.Namespace) -> dict:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(metrics, indent=2) + "\n")
+    if args.checkpoint_path:
+        checkpoint = Path(args.checkpoint_path)
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"trainable_state": {name: parameter.detach().cpu()
+                                          for name, parameter in agent.named_parameters()
+                                          if parameter.requires_grad},
+                    "architecture": {"encoder": args.encoder, "experts": args.experts,
+                                     "rank": args.rank, "layers": args.layers,
+                                     "pretrain_tokens": args.warmup_steps > 0}}, checkpoint)
+    if args.export_case is not None:
+        if not 0 <= args.export_case < len(cases):
+            raise ValueError("export-case index is outside the test cases")
+        adapter_dir = output.parent / f"generated_adapter_case_{args.export_case}"
+        metrics["exported_adapter"] = str(adapter_dir)
+        export_peft_lora(agent, tokenizer, cases[args.export_case]["source"],
+                         adapter_dir, args.model, args.device)
+        output.write_text(json.dumps(metrics, indent=2) + "\n")
     print(json.dumps({"accuracy": metrics["accuracy"], "output": str(output)}), flush=True)
     return metrics
 
@@ -205,7 +329,12 @@ def main() -> None:
     parser.add_argument("--experts", type=int, default=4)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--encoder", choices=("gru", "attention"), default="attention")
+    parser.add_argument("--warmup-steps", type=int, default=0)
+    parser.add_argument("--test-set", choices=("original", "fresh", "distractor", "combined"),
+                        default="original")
     parser.add_argument("--output", default="results/trajectory_hyperlora/pilot_20261004/metrics.json")
+    parser.add_argument("--checkpoint-path", default=None)
+    parser.add_argument("--export-case", type=int, default=None)
     run(parser.parse_args())
 
 
