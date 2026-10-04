@@ -32,11 +32,13 @@ def audit(output: Path) -> dict:
     if design['schema'] not in ('alf_three_memory_coalition_v1',
                                 'alf_three_memory_coalition_holdout_v1',
                                 'alf_three_memory_coalition_group6_v1',
-                                'alf_three_memory_coalition_group7_v1'):
+                                'alf_three_memory_coalition_group7_v1',
+                                'alf_three_memory_coalition_group8_v1'):
         raise ValueError('Wrong design schema')
     holdout = design['schema'] == 'alf_three_memory_coalition_holdout_v1'
     group6 = design['schema'] == 'alf_three_memory_coalition_group6_v1'
     group7 = design['schema'] == 'alf_three_memory_coalition_group7_v1'
+    group8 = design['schema'] == 'alf_three_memory_coalition_group8_v1'
     origin = Path(design['origin'])
     report = audit_source(origin)
     if not report['complete'] or report['missing']:
@@ -49,7 +51,8 @@ def audit(output: Path) -> dict:
     if group6 and sha(origin / 'cross_group_input_audit.json') != design['cross_group_audit_sha256']:
         raise ValueError('Group6 cross-group input audit changed')
     root = Path(__file__).parent
-    runner = ('probe_alf_coalition_group7.py' if group7 else
+    runner = ('probe_alf_coalition_group8.py' if group8 else
+              'probe_alf_coalition_group7.py' if group7 else
               'probe_alf_coalition_group6.py' if group6 else
               'probe_alf_coalition_holdout.py' if holdout else
               'probe_alf_coalition_credit.py')
@@ -72,6 +75,15 @@ def audit(output: Path) -> dict:
         if ([item['case'] for item in design['cases']] != selected_cases(origin) or
                 set(design['prior_design_sha256']) != {'3', '4', '5', '6'}):
             raise ValueError('Outcome-blind group7 selection changed')
+        for group, expected in design['prior_design_sha256'].items():
+            previous = origin.parent / f'20261003_alf_train_credit_extension_group{group}_v1' / 'design.json'
+            if sha(previous) != expected:
+                raise ValueError(f'Group{group} prior design changed')
+    if group8:
+        from .probe_alf_coalition_group8 import selected_cases
+        if ([item['case'] for item in design['cases']] != selected_cases(origin) or
+                set(design['prior_design_sha256']) != {'3', '4', '5', '6', '7'}):
+            raise ValueError('Outcome-blind group8 selection changed')
         for group, expected in design['prior_design_sha256'].items():
             previous = origin.parent / f'20261003_alf_train_credit_extension_group{group}_v1' / 'design.json'
             if sha(previous) != expected:
