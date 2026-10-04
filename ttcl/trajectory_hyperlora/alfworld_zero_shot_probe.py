@@ -119,9 +119,20 @@ def generate(agent, tokenizer, messages: list[dict], device: str,
 def run_episode(agent, tokenizer, game: Path, fields: dict,
                 *, adapter: bool, device: str, max_steps: int,
                 max_new_tokens: int,
-                constrain_actions: bool = False) -> dict:
+                constrain_actions: bool = False,
+                fixed_adapter: list[torch.Tensor] | None = None) -> dict:
+    if adapter and fixed_adapter is not None:
+        raise ValueError("Choose trajectory adapter or fixed adapter")
     with torch.no_grad():
         agent.set_source(fields if adapter else None)
+        if fixed_adapter is not None:
+            if len(fixed_adapter) != len(agent.adapters):
+                raise ValueError("Fixed adapter layer count mismatch")
+            for layer, value in zip(agent.adapters, fixed_adapter, strict=True):
+                expected = (1, layer.base.out_features, layer.rank)
+                if tuple(value.shape) != expected:
+                    raise ValueError("Fixed adapter factor shape mismatch")
+                layer.b = value.to(device)
     env = make_env(game)
     trajectory = []
     try:

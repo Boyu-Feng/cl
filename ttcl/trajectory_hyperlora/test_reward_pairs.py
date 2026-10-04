@@ -7,6 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import torch
+
+from ttcl.trajectory_hyperlora.analyze_alf_eval import paired_counts
+from ttcl.trajectory_hyperlora.diagnose_source_adapters import effective_gram
 from ttcl.trajectory_hyperlora.prepare_alf_next_task import digest_json, partition
 from ttcl.trajectory_hyperlora.prepare_alf_reward_pairs import validate_reward_review
 from ttcl.trajectory_hyperlora.paired_reward_gate import fit_gate, score_gate
@@ -75,6 +79,24 @@ class RewardPairReviewTest(unittest.TestCase):
         self.assertFalse(gate["pick_and_place_simple"]["use_lora"])
         self.assertFalse(gate["pick_two_obj_and_place"]["use_lora"])
         self.assertEqual(score_gate(train, gate)["gated_successes"], 3.0)
+
+    def test_effective_lora_gram_matches_explicit_updates(self) -> None:
+        a = torch.tensor([[1., 2., 0.], [0., -1., 3.]])
+        bs = [[torch.tensor([[1., 2.], [3., 4.]])],
+              [torch.tensor([[2., 1.], [-1., 2.]])]]
+        kernel = effective_gram(bs, [a])
+        updates = [(item[0] @ a).flatten().double() for item in bs]
+        expected = torch.stack(updates) @ torch.stack(updates).T
+        torch.testing.assert_close(kernel, expected)
+
+    def test_paired_counts_use_discordant_environment_wins(self) -> None:
+        rows = [{"base": {"reward": a}, "mean_adapter": {"reward": b}}
+                for a, b in ((1, 1), (1, 0), (0, 1), (0, 1))]
+        result = paired_counts(rows, "base", "mean_adapter")
+        self.assertEqual((result["left_successes"], result["right_successes"]),
+                         (2, 3))
+        self.assertEqual((result["right_only"], result["left_only"]), (2, 1))
+        self.assertEqual(result["exact_two_sided_sign_p"], 1.0)
 
 
 if __name__ == "__main__":

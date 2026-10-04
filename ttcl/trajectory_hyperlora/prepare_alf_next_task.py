@@ -48,7 +48,7 @@ def successful_episodes(root: Path, train_games: set[str]) -> dict[str, Path]:
 
 
 def replay_targets(game_path: Path, episode: dict,
-                   max_targets: int) -> list[dict]:
+                   max_targets: int, selection: str = "last") -> list[dict]:
     environment = make_env(game_path)
     try:
         state = environment.reset()
@@ -73,14 +73,23 @@ def replay_targets(game_path: Path, episode: dict,
             messages.append({"role": "assistant", "content": command})
         if not state["won"]:
             raise ValueError("Historical success did not replay as a win")
-        return eligible[-max_targets:]
+        if selection == "last":
+            return eligible[-max_targets:]
+        if selection == "even":
+            count = min(max_targets, len(eligible))
+            if count == 1:
+                return eligible[-1:]
+            return [eligible[(index * (len(eligible) - 1) + (count - 1) // 2)
+                             // (count - 1)] for index in range(count)]
+        raise ValueError(f"Unknown target selection: {selection}")
     finally:
         environment.close()
 
 
-def prepare(root: Path, data_root: Path, *, max_targets: int = 2) -> dict:
-    if max_targets < 1:
-        raise ValueError("max_targets must be positive")
+def prepare(root: Path, data_root: Path, *, max_targets: int = 2,
+            target_selection: str = "last") -> dict:
+    if max_targets < 1 or target_selection not in {"last", "even"}:
+        raise ValueError("Invalid target selection or count")
     plan_path = root / "plan.json"
     plan = json.loads(plan_path.read_text())
     train_games = {game for sequence in plan["training"] for game in sequence["games"]}
@@ -109,7 +118,8 @@ def prepare(root: Path, data_root: Path, *, max_targets: int = 2) -> dict:
             failures.append({"game": target_game, "reason": "missing_game"})
             continue
         try:
-            targets = replay_targets(game_path, target_episode, max_targets)
+            targets = replay_targets(game_path, target_episode, max_targets,
+                                     target_selection)
         except Exception as error:
             failures.append({"game": target_game, "reason": repr(error)})
             continue
@@ -197,6 +207,8 @@ def main() -> None:
     parser.add_argument("--data-root", type=Path, default=Path(
         "ttcl/data/alfworld_delta"))
     parser.add_argument("--max-targets", type=int, default=2)
+    parser.add_argument("--target-selection", choices=("last", "even"),
+                        default="last")
     parser.add_argument("--output", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_next_task_candidates_20261005.json"))
     parser.add_argument("--reviewed-annotations", type=Path)
@@ -212,7 +224,8 @@ def main() -> None:
                           "train": sum(row["split"] == "train" for row in approved),
                           "dev": sum(row["split"] == "dev" for row in approved)}))
         return
-    result = prepare(args.root, args.data_root, max_targets=args.max_targets)
+    result = prepare(args.root, args.data_root, max_targets=args.max_targets,
+                     target_selection=args.target_selection)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps({"successful_train_games": result["successful_train_games"],

@@ -33,6 +33,8 @@ def main() -> None:
         "ttcl/data/alfworld_delta"))
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--gpu-fraction", type=float, default=.40)
+    parser.add_argument("--source-mismatch", choices=("same_family", "different_family"),
+                        default="same_family")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
@@ -69,15 +71,22 @@ def main() -> None:
                 positives.append(row)
     selected, exclusions = [], []
     for row in positives:
-        choices = [source for source in by_family[family(row["game"])].values()
-                   if source["source_game"] not in (
-                       row["source_game"], row["game"])]
+        target_family = family(row["game"])
+        if args.source_mismatch == "same_family":
+            pool = by_family[target_family].values()
+        else:
+            pool = (source for other_family, family_sources in by_family.items()
+                    if other_family != target_family
+                    for source in family_sources.values())
+        choices = [source for source in pool if source["source_game"] not in (
+            row["source_game"], row["game"])]
         if not choices:
             exclusions.append({"game": row["game"],
                                "reason": "no_distinct_reviewed_train_source"})
             continue
         source = min(choices, key=lambda source: digest_json(
-            ["wrong_source", row["game"], source["source_game"]]))
+            ["wrong_source", args.source_mismatch, row["game"],
+             source["source_game"]]))
         game_path = args.data_root / row["game"]
         if sha256(game_path) != row["game_sha256"]:
             raise ValueError("Reference target game hash changed")
@@ -86,7 +95,8 @@ def main() -> None:
         raise ValueError("No source-specificity probes with reviewed alternatives")
     agent, tokenizer = load_agent(args.model, args.checkpoint,
                                   args.device, args.gpu_fraction)
-    result = {"protocol": "Train-reviewed wrong-source control for base-failed, correct-source-LoRA-won ALFWorld games; same actor, target, reset, admissible-command constraint and 50-step budget",
+    result = {"protocol": "Train-reviewed source-swap control for base-failed, correct-source-LoRA-won ALFWorld games; same actor, target, reset, admissible-command constraint and 50-step budget",
+              "source_mismatch": args.source_mismatch,
               "checkpoint_sha256": checkpoint_sha,
               "reference_sha256": {str(path): sha256(path) for path in args.reference},
               "historical_review_sha256": sha256(args.historical_review),
