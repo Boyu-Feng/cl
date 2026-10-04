@@ -6231,3 +6231,9 @@ Mem0 机制分析脚本为 `ttcl.icl_mem0_comparison.analyze`，每次写入新�
 ## 2026-10-04：轨迹中程序性经验的参数化存在性验证
 
 完整协议、失败尝试和逐项限制见 `ttcl/trajectory_hyperlora/EXPERIENCE_TRANSFER_FEASIBILITY_20261004.md`。合成环境有两种隐藏的奇偶读数→左右动作约定。每种约定的 16 条完成成功动作仅用于训练相应 rank-4 LoRA；Qwen3-4B 底座冻结，测试新读数不在源轨迹里，另用不同措辞提问。种子 42、43 均为：不挂载 4/8、完整轨迹文本 8/8、正确轨迹 LoRA 7/8、错配轨迹 LoRA 1/8。种子 42 的 LoRA 导出为标准 PEFT 文件并在独立进程重载，另一组全新读数为 8/8，错配 0/8；该复验提问措辞经过一次看到解释性输出后的调整，属探索性。早期直接轨迹→LoRA 超网络和两阶段路由版本未稳定超过错配对照；唯一探测路由版本 12/16 仍有集中错误。因此这轮支持“轨迹中的规则可以成为可迁移参数经验”的狭义可行性，不证明超网络生成算法已解决，更不是 ALFWorld／CLBench 效果。所有权重和逐题记录仅保存在 ignored `results/`，仓库只提交代码与摘要；不改动其他 GPU 实验。
+
+## 2026-10-05：直接轨迹→LoRA 的配对效用研究启动
+
+方法、论文关系、初步数据审计与后续训练条件见 `ttcl/trajectory_hyperlora/TRAJECTORY_TO_LORA_RESEARCH_20261005.md`。复核上段 7/8 后发现两个种子均是：规则 0 从基模 0/4 提升到 LoRA 3/4，规则 1 基模已为 4/4，LoRA 仍为 4/4。因此不能把总分解释为两种规则都提高。新效用函数以同一后续任务的候选 LoRA 减无 LoRA 奖励为主，惩罚负迁移；错配轨迹只作诊断，不计入主奖励。它拒绝缺失、非有限及重复的配对反馈，随机潜变量的策略梯度作用于生成器而非旧轨迹每个动作。
+
+现存冻结 ALFWorld train 计划的 144 个游戏与 36 个评测游戏无交集。训练日志中审计出 96 个相邻任务候选对，源任务成功 22、失败 74；仅作为内容哈希绑定的候选，不复用旧监督标签，也不把历史后续任务奖励冒充新 LoRA 的配对奖励。代码为 `ttcl/trajectory_hyperlora/{paired_utility,audit_alf_pairs}.py`，审计原始输出在 ignored `results/trajectory_hyperlora/alf_train_pair_audit.json`。本轮完成了数据／目标函数审计，尚未训练生成器或 RL，也未取得新 ALFWorld／CLBench 分数。
