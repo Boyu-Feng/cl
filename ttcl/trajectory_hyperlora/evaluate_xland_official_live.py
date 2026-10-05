@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import random
 import subprocess
 from pathlib import Path
 
@@ -115,17 +117,23 @@ def select(agent, tokenizer, choices, observation, factors, device):
 
 
 def episode(worker, agent, tokenizer, choices, rule_id, seed, budget,
-            factors, device):
+            factors, device, sample_temperature=0., sample_seed=None):
     response = worker.send({"command": "reset", "ruleset_id": rule_id,
                             "seed": seed})
     if response["num_actions"] != 6:
         raise ValueError("Unexpected official action space")
+    rng = random.Random(sample_seed) if sample_temperature > 0 else None
     rows = []
     for _ in range(budget):
         before = state(response["observation"])
         action, input_hash, logits = select(agent, tokenizer, choices,
                                             response["observation"], factors,
                                             device)
+        if rng is not None:
+            peak = max(logits)
+            weights = [math.exp((value - peak) / sample_temperature)
+                       for value in logits]
+            action = rng.choices(range(6), weights=weights, k=1)[0]
         response = worker.send({"command": "step", "action": action})
         rows.append({"state": before, "action": action,
                      "next_state": state(response["observation"]),
@@ -141,7 +149,10 @@ def episode(worker, agent, tokenizer, choices, rule_id, seed, budget,
 def run(args):
     if args.output.exists():
         raise FileExistsError(args.output)
-    if not 1 <= args.steps <= 16:
+    source_budget = args.source_steps or args.steps
+    target_budget = args.target_steps or args.steps
+    if not 1 <= source_budget <= 16 or target_budget < 1 or \
+            args.source_temperature < 0:
         raise ValueError("Source encoder supports at most 16 steps")
     annotations = json.loads(args.annotations.read_text())
     test = annotations["split"]["test"][:args.limit]
@@ -162,6 +173,10 @@ def run(args):
               "source_seed": args.source_seed,
               "target_seed": args.target_seed,
               "steps_per_episode": args.steps,
+              "source_steps": source_budget,
+              "target_steps": target_budget,
+              "source_temperature": args.source_temperature,
+              "source_sampling_seed": args.source_sampling_seed,
               "choice_set": list(range(6)),
               "trained_choice_set": list(range(5)),
               "rows": [], "failures": []}
@@ -171,8 +186,9 @@ def run(args):
             rule_id = task["ruleset_id"]
             try:
                 source = episode(worker, agent, tokenizer, choices,
-                    rule_id, args.source_seed + rule_id, args.steps, None,
-                    args.device)
+                    rule_id, args.source_seed + rule_id, source_budget, None,
+                    args.device, args.source_temperature,
+                    args.source_sampling_seed + rule_id)
                 public_steps = [{key: step[key] for key in
                     ("state", "action", "next_state", "reward", "done")}
                     for step in source["steps"]]
@@ -183,10 +199,10 @@ def run(args):
                 factors = agent.compile_adapters(
                     source_tensor(model_input, args.device))
                 with_memory = episode(worker, agent, tokenizer, choices,
-                    rule_id, args.target_seed + rule_id, args.steps,
+                    rule_id, args.target_seed + rule_id, target_budget,
                     factors, args.device)
                 baseline = episode(worker, agent, tokenizer, choices,
-                    rule_id, args.target_seed + rule_id, args.steps,
+                    rule_id, args.target_seed + rule_id, target_budget,
                     None, args.device)
                 result["rows"].append({"task_id": task["task_id"],
                     "ruleset_id": rule_id,
@@ -243,6 +259,10 @@ def main():
     parser.add_argument("--source-seed", type=int, default=61005)
     parser.add_argument("--target-seed", type=int, default=71005)
     parser.add_argument("--steps", type=int, default=12)
+    parser.add_argument("--source-steps", type=int)
+    parser.add_argument("--target-steps", type=int)
+    parser.add_argument("--source-temperature", type=float, default=0.)
+    parser.add_argument("--source-sampling-seed", type=int, default=81005)
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--task-ids", type=int, nargs="*")
     parser.add_argument("--output", type=Path, required=True)

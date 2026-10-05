@@ -1,4 +1,4 @@
-"""Compare own and wrong online histories on identical official observations."""
+"""Compare online, mismatched, and reviewed histories on identical observations."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from ttcl.trajectory_hyperlora.evaluate_xland_official_live import (
 from ttcl.trajectory_hyperlora.train_xland_official_history_hyperlora import (
     source_tensor,
 )
+from ttcl.trajectory_hyperlora.train_xland_raw_hyperlora import checked_query
 
 
 def run(args):
@@ -30,7 +31,10 @@ def run(args):
     torch.cuda.set_per_process_memory_fraction(args.gpu_fraction,
                                                device=args.device)
     agent, tokenizer, choices = load_actor(args)
-    result = {"protocol": "Frozen model same initial official target observation; compare own model-selected source versus next disjoint ruleset source versus none; action diagnostic only, not reward evaluation",
+    annotation_items = json.loads(args.annotations.read_text())["split"]["test"]
+    reviewed = {item["ruleset_id"]: checked_query(item["queries"][0])[0][
+        "source_episodes"] for item in annotation_items}
+    result = {"protocol": "Frozen model same initial official target observation; compare own online source, next disjoint ruleset online source, reviewed positive source, and none; action diagnostic only, not reward evaluation",
               "input_sha256": {str(path): sha256(path) for path in args.inputs},
               "checkpoint_sha256": sha256(args.checkpoint), "rows": []}
     for index, row in enumerate(rows):
@@ -39,15 +43,19 @@ def run(args):
         output = {}
         for kind, source in (("own", row),
                              ("wrong", rows[(index + 1) % len(rows)]),
+                             ("reviewed_positive", row),
                              ("none", None)):
             factors = None
             source_hash = None
             if source is not None:
-                steps = [{key: step[key] for key in
-                    ("state", "action", "next_state", "reward", "done")}
-                    for step in source["source"]["steps"]]
-                content = {"source_episodes": [{"goal": [0, 0],
-                    "steps": steps}],
+                if kind == "reviewed_positive":
+                    episodes = reviewed[row["ruleset_id"]]
+                else:
+                    steps = [{key: step[key] for key in
+                        ("state", "action", "next_state", "reward", "done")}
+                        for step in source["source"]["steps"]]
+                    episodes = [{"goal": [0, 0], "steps": steps}]
+                content = {"source_episodes": episodes,
                     "target_initial_state": {"observation":
                         target_observation, "pocket": [0, 0]},
                     "goal": [0, 0]}
@@ -70,7 +78,13 @@ def run(args):
         "own_vs_none_action_changes": sum(row["output"]["own"]["action"]
             != row["output"]["none"]["action"] for row in result["rows"]),
         "wrong_vs_none_action_changes": sum(row["output"]["wrong"]["action"]
-            != row["output"]["none"]["action"] for row in result["rows"])}
+            != row["output"]["none"]["action"] for row in result["rows"]),
+        "reviewed_positive_vs_own_action_changes": sum(row["output"][
+            "reviewed_positive"]["action"] != row["output"]["own"][
+            "action"] for row in result["rows"]),
+        "reviewed_positive_vs_none_action_changes": sum(row["output"][
+            "reviewed_positive"]["action"] != row["output"]["none"][
+            "action"] for row in result["rows"])}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result["summary"]), flush=True)
