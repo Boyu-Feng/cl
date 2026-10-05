@@ -35,32 +35,44 @@ def state_tensor(state: dict) -> list[int]:
 def encode_query(content: dict) -> tuple[list[list[int]], list[list[int]],
                                          list[list[int]], list[int],
                                          list[float], list[float], list[int],
-                                         list[int]]:
+                                         list[int], list[int], list[int]]:
     before, after, goals, actions, rewards, dones = [], [], [], [], [], []
-    for episode in content["source_episodes"]:
-        for step in episode["steps"]:
+    episodes, step_positions = [], []
+    for episode_index, episode in enumerate(content["source_episodes"]):
+        for step_index, step in enumerate(episode["steps"]):
             before.append(state_tensor(step["state"]))
             after.append(state_tensor(step["next_state"]))
             goals.append(episode["goal"])
             actions.append(step["action"])
             rewards.append(float(step["reward"]))
             dones.append(float(step["done"]))
+            episodes.append(episode_index)
+            step_positions.append(step_index)
     if not before or len(before) > 16:
         raise ValueError("Expected 1..16 public trajectory steps")
     return (before, after, goals, actions, rewards, dones,
-            state_tensor(content["target_initial_state"]), content["goal"])
+            state_tensor(content["target_initial_state"]), content["goal"],
+            episodes, step_positions)
 
 
 def make_split(items: list[dict], device: str) -> dict[str, torch.Tensor]:
     rows, labels, opposite = [], [], []
     for item in items:
-        for variant in ("hold_near", "near_hold"):
-            for query_index in (0, 1):
+        if set(item["arms"]) == {"hold_near", "near_hold"}:
+            variants, queries_per_arm = ("hold_near", "near_hold"), 2
+        elif set(item["arms"]) == {"hold", "near", "tile_near"}:
+            variants, queries_per_arm = ("hold", "near", "tile_near"), 1
+        else:
+            raise ValueError("Unsupported audited trajectory group")
+        start = len(rows)
+        for arm_index, variant in enumerate(variants):
+            for query_index in range(queries_per_arm):
                 query = item["arms"][variant]["queries"][query_index]
                 content, target = checked_query(query)
                 rows.append(encode_query(content))
                 labels.append(target)
-                opposite.append(len(rows) - 1 + (2 if variant == "hold_near" else -2))
+                opposite.append(start + ((arm_index + 1) % len(variants)) *
+                                queries_per_arm + query_index)
     n, length = len(rows), max(len(row[0]) for row in rows)
     data = {
         "before": torch.zeros(n, length, 52, dtype=torch.long),
@@ -69,6 +81,8 @@ def make_split(items: list[dict], device: str) -> dict[str, torch.Tensor]:
         "actions": torch.zeros(n, length, dtype=torch.long),
         "rewards": torch.zeros(n, length),
         "dones": torch.zeros(n, length),
+        "episode_index": torch.zeros(n, length, dtype=torch.long),
+        "step_index": torch.zeros(n, length, dtype=torch.long),
         "mask": torch.zeros(n, length, dtype=torch.bool),
         "query_state": torch.zeros(n, 52, dtype=torch.long),
         "query_goal": torch.zeros(n, 2, dtype=torch.long),
@@ -76,11 +90,14 @@ def make_split(items: list[dict], device: str) -> dict[str, torch.Tensor]:
         "opposite": torch.tensor(opposite, dtype=torch.long),
     }
     for i, row in enumerate(rows):
-        before, after, goals, actions, rewards, dones, state, goal = row
+        before, after, goals, actions, rewards, dones, state, goal, \
+            episodes, step_positions = row
         m = len(before)
         for key, values in (("before", before), ("after", after),
                             ("goals", goals), ("actions", actions),
-                            ("rewards", rewards), ("dones", dones)):
+                            ("rewards", rewards), ("dones", dones),
+                            ("episode_index", episodes),
+                            ("step_index", step_positions)):
             data[key][i, :m] = torch.tensor(values)
         data["mask"][i, :m] = True
         data["query_state"][i] = torch.tensor(state)
@@ -89,13 +106,17 @@ def make_split(items: list[dict], device: str) -> dict[str, torch.Tensor]:
         raise ValueError("Action outside public XLand action space")
     if data["before"].max() > 63 or data["after"].max() > 63:
         raise ValueError("Tile value outside pilot embedding table")
-    return {key: value.to(device) for key, value in data.items()}
+    data["group_size"] = len(variants) * queries_per_arm
+    return {key: value.to(device) if isinstance(value, torch.Tensor) else value
+            for key, value in data.items()}
 
 
 class RawHyperLoRA(nn.Module):
-    def __init__(self, width: int = 64, rank: int = 8) -> None:
+    def __init__(self, width: int = 64, rank: int = 8,
+                 order_invariant_source: bool = False) -> None:
         super().__init__()
         self.rank = rank
+        self.order_invariant_source = order_invariant_source
         # Shared, generic value encoder. No named object/action/rule slots.
         self.value = nn.Embedding(64, 16)
         self.state = nn.Sequential(nn.Linear(52 * 16, width), nn.GELU(),
@@ -132,8 +153,8 @@ class RawHyperLoRA(nn.Module):
     def goal_vector(self, values: torch.Tensor) -> torch.Tensor:
         return self.goal(self.value(values).flatten(-2))
 
-    def compile_adapter(self, data: dict, source: str = "correct") -> torch.Tensor:
-        """Compile source episodes once; output is a mountable LoRA B factor."""
+    def source_latent(self, data: dict, source: str = "correct") -> torch.Tensor:
+        """Encode public source trajectories without seeing target labels."""
         before = self.state_vector(data["before"])
         after = self.state_vector(data["after"])
         goal = self.goal_vector(data["goals"])
@@ -142,17 +163,41 @@ class RawHyperLoRA(nn.Module):
                      after - before, data["rewards"].unsqueeze(-1),
                      data["dones"].unsqueeze(-1)), dim=-1))
         batch, length, _ = event.shape
-        sequence = torch.cat((self.cls.expand(batch, -1, -1), event), dim=1)
-        sequence = sequence + self.position(torch.arange(length + 1,
-                                                       device=event.device))
-        padding = torch.cat((torch.zeros(batch, 1, dtype=torch.bool,
-                                       device=event.device), ~data["mask"]), dim=1)
-        latent = self.trajectory(sequence, src_key_padding_mask=padding)[:, 0]
+        if self.order_invariant_source:
+            # Each episode is an ordered sequence. Independent episodes are a
+            # set: no episode-index embedding or fixed probe slot is exposed.
+            episode_latents, active_episodes = [], []
+            for index in range(int(data["episode_index"].max()) + 1):
+                present = data["mask"] & (data["episode_index"] == index)
+                events = event + self.position(data["step_index"] + 1)
+                sequence = torch.cat((self.cls.expand(batch, -1, -1) +
+                                      self.position.weight[0], events), dim=1)
+                padding = torch.cat((torch.zeros(batch, 1, dtype=torch.bool,
+                    device=event.device), ~present), dim=1)
+                episode_latents.append(self.trajectory(
+                    sequence, src_key_padding_mask=padding)[:, 0])
+                active_episodes.append(present.any(dim=1))
+            active = torch.stack(active_episodes, dim=1).float()
+            latent = (torch.stack(episode_latents, dim=1) *
+                      active.unsqueeze(-1)).sum(dim=1) / active.sum(
+                          dim=1, keepdim=True).clamp_min(1)
+        else:
+            sequence = torch.cat((self.cls.expand(batch, -1, -1), event), dim=1)
+            sequence = sequence + self.position(torch.arange(length + 1,
+                                                           device=event.device))
+            padding = torch.cat((torch.zeros(batch, 1, dtype=torch.bool,
+                                           device=event.device), ~data["mask"]), dim=1)
+            latent = self.trajectory(sequence, src_key_padding_mask=padding)[:, 0]
         if source == "wrong":
             latent = latent[data["opposite"]]
         elif source != "correct":
             raise ValueError(source)
-        return self.hyper(latent).reshape(batch, 6, self.rank)
+        return latent
+
+    def compile_adapter(self, data: dict, source: str = "correct") -> torch.Tensor:
+        """Compile source episodes once; output is a mountable LoRA B factor."""
+        latent = self.source_latent(data, source)
+        return self.hyper(latent).reshape(len(latent), 6, self.rank)
 
     def policy_logits(self, query_state: torch.Tensor,
                       query_goal: torch.Tensor,
@@ -179,16 +224,22 @@ def score(model: RawHyperLoRA, data: dict) -> dict:
         logits = {kind: model(data, kind) for kind in ("correct", "wrong", "none")}
         predictions = {key: value.argmax(-1) for key, value in logits.items()}
         targets = data["target"]
-        grouped = predictions["correct"].reshape(-1, 4)
-        return {"n": len(targets),
-                **{key: int((prediction == targets).sum())
-                   for key, prediction in predictions.items()},
-                "swap_changes": int((predictions["correct"] !=
-                                     predictions["wrong"]).sum()),
-                "within_history_distinct": int(
-                    (grouped[:, 0] != grouped[:, 1]).sum() +
-                    (grouped[:, 2] != grouped[:, 3]).sum()),
-                "within_history_count": 2 * len(grouped)}
+        grouped = predictions["correct"].reshape(-1, data["group_size"])
+        result = {"n": len(targets),
+                  **{key: int((prediction == targets).sum())
+                     for key, prediction in predictions.items()},
+                  "swap_changes": int((predictions["correct"] !=
+                                       predictions["wrong"]).sum())}
+        if data["group_size"] == 4:
+            result.update(within_history_distinct=int(
+                (grouped[:, 0] != grouped[:, 1]).sum() +
+                (grouped[:, 2] != grouped[:, 3]).sum()),
+                within_history_count=2 * len(grouped))
+        else:
+            result.update(all_actions_distinct=int(sum(
+                len(set(row.tolist())) == data["group_size"] for row in grouped)),
+                item_count=len(grouped))
+        return result
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -199,7 +250,8 @@ def run(args: argparse.Namespace) -> dict:
     torch.manual_seed(args.seed)
     split = {name: make_split(annotations["split"][name], args.device)
              for name in ("train", "dev", "test")}
-    model = RawHyperLoRA(args.width, args.rank).to(args.device)
+    model = RawHyperLoRA(args.width, args.rank,
+                         args.order_invariant_source).to(args.device)
     optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad),
                                   lr=args.lr, weight_decay=args.weight_decay)
     best_dev, best_state, best_step = -1, None, 0
@@ -233,11 +285,12 @@ def run(args: argparse.Namespace) -> dict:
                               for key, value in model.state_dict().items()}
     assert best_state is not None
     model.load_state_dict(best_state)
-    result = {"protocol": "Raw public XLand state/action/reward trajectory -> transformer hypernetwork -> generated LoRA B on frozen small policy. No rule or tile-delta feature. Future-action CE, train-only fitting, dev-selected checkpoint, rule-disjoint test.",
+    result = {"protocol": "Raw public XLand state/action/reward trajectory -> transformer hypernetwork -> generated LoRA B on frozen small policy. No rule or tile-delta feature. Future-action CE, train-only fitting, dev-selected checkpoint, rule-content-disjoint test; mechanisms may recur across splits.",
               "annotations_sha256": hashlib.sha256(raw).hexdigest(),
               "seed": args.seed, "steps": args.steps, "best_step": best_step,
               "width": args.width, "rank": args.rank, "lr": args.lr,
               "pair_weight": args.pair_weight, "pair_margin": args.pair_margin,
+              "order_invariant_source": args.order_invariant_source,
               "history": history,
               **{name: score(model, split[name])
                  for name in ("train", "dev", "test")}}
@@ -266,6 +319,7 @@ def main() -> None:
     parser.add_argument("--rank", type=int, default=8)
     parser.add_argument("--pair-weight", type=float, default=0)
     parser.add_argument("--pair-margin", type=float, default=1)
+    parser.add_argument("--order-invariant-source", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
     args = parser.parse_args()

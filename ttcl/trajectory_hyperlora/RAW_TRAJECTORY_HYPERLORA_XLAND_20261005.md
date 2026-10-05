@@ -41,4 +41,6 @@
 
 下一步先将同一输入/输出接口接到冻结 Qwen 的真实 LoRA 层，再测试更多规则机制、布局及多步后续回报；保留正确/相反/空历史三路评估，并和显式文本经验及在线 RL 比较。训练数据必须继续从新轨迹生成、独立复核目标与内容绑定，不能沿用旧历史 ID 的标签。
 
+三机制、变化布局、试验顺序反事实检查及 MemRL 对照的后续结果见 [多机制对比报告](X_LAND_MULTI_MECHANISM_MEMRL_COMPARISON_20261005.md)。后续检查发现固定试验顺序会让旧编码器学到位置捷径，因此阅读本轮高分时应同时看该报告的重排对照。
+
 复现代码依次为 `prepare_xland_ruleset_split.py`、`collect_xland_rule_pairs.py`、`collect_xland_crossed_rules.py`、`review_xland_crossed_rules.py`、`train_xland_raw_hyperlora.py`。资产和环境安装路径见 [数据集试点记录](TRAJECTORY_DATASET_NEXT_STEP_20261005.md)；生成结果必须写入新路径，不覆盖已冻结运行。
