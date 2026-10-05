@@ -19,21 +19,25 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from ttcl.trajectory_hyperlora.feedback_relation_pretrain import add_corrections
 from ttcl.trajectory_hyperlora.general_relation_hyperlora import first_logits
 from ttcl.trajectory_hyperlora.pretrained_relation_hyperlora import PretrainedRelationHyperLoRA
-from ttcl.trajectory_hyperlora.slot_lora_oracle_pilot import EVAL_QUERY
+from ttcl.trajectory_hyperlora.slot_lora_oracle_pilot import (
+    CUES as TRAIN_CUES, EVAL_QUERY,
+)
 
 
 CUES = ("OMEGA", "SIGMA", "THETA", "KAPPA", "LAMBDA")
-RULES = {3: (1, 2, 5, 6), 5: (5, 10, 22, 25)}
+RULES = {3: (1, 2, 5, 6), 4: (3, 5, 6, 9, 10, 12),
+         5: (5, 10, 22, 25)}
 EVAL_NUMBERS = (151, 164)
 
 
-def records(rule: int, cue_count: int, seed: int, corrected: bool) -> list[dict]:
+def records(rule: int, cue_count: int, seed: int, corrected: bool,
+            cue_words: tuple[str, ...] = CUES) -> list[dict]:
     if cue_count not in RULES or rule >= 1 << cue_count:
         raise ValueError("Invalid cue count or rule")
     rng = random.Random(seed)
     numbers = rng.sample(range(1, 90), 3 * cue_count)
     steps = []
-    for index, cue in enumerate(CUES[:cue_count]):
+    for index, cue in enumerate(cue_words[:cue_count]):
         label = "RIGHT" if (rule >> index) & 1 else "LEFT"
         for number in numbers[3 * index:3 * (index + 1)]:
             steps.append({
@@ -53,6 +57,9 @@ def records(rule: int, cue_count: int, seed: int, corrected: bool) -> list[dict]
 def run(args: argparse.Namespace) -> dict:
     if args.output.exists():
         raise FileExistsError(args.output)
+    if args.original_cues and args.cue_counts != [4]:
+        raise ValueError("Original training vocabulary only has four cues")
+    cue_words = TRAIN_CUES if args.original_cues else CUES
     if args.device.startswith("cuda"):
         torch.cuda.set_per_process_memory_fraction(args.gpu_fraction,
                                                    device=args.device)
@@ -83,13 +90,15 @@ def run(args: argparse.Namespace) -> dict:
            for label in ("LEFT", "RIGHT")}
     rows = []
     with torch.no_grad():
-        for cue_count, rules in RULES.items():
+        for cue_count in args.cue_counts:
+            rules = RULES[cue_count]
             for rule in rules:
                 for source_seed in (3001, 3002):
                     seed = 10000 + 31 * rule + source_seed
-                    source = records(rule, cue_count, seed, args.corrected)
+                    source = records(rule, cue_count, seed, args.corrected,
+                                     cue_words)
                     wrong = records(rule ^ ((1 << cue_count) - 1),
-                                    cue_count, seed, args.corrected)
+                                    cue_count, seed, args.corrected, cue_words)
                     if any(left["observation"] != right["observation"] or
                            left["feedback"] != right["feedback"]
                            for left, right in zip(source, wrong, strict=True)):
@@ -100,7 +109,7 @@ def run(args: argparse.Namespace) -> dict:
                                                           args.device))
                     source_sha = hashlib.sha256(json.dumps(
                         source, sort_keys=True).encode()).hexdigest()
-                    for index, cue in enumerate(CUES[:cue_count]):
+                    for index, cue in enumerate(cue_words[:cue_count]):
                         expected = "RIGHT" if (rule >> index) & 1 else "LEFT"
                         for number in EVAL_NUMBERS:
                             question = EVAL_QUERY["test"].format(
@@ -125,7 +134,7 @@ def run(args: argparse.Namespace) -> dict:
                             agent.mount(None)
                             rows.append(row)
     groups = {}
-    for count in RULES:
+    for count in args.cue_counts:
         items = [row for row in rows if row["cue_count"] == count]
         groups[str(count)] = {
             "n": len(items),
@@ -137,7 +146,9 @@ def run(args: argparse.Namespace) -> dict:
         }
     result = {
         "protocol": "Frozen exploratory cardinality shift from training four cues to three or five; same binary actions and question family; first-token exact scoring",
-        "cues": CUES, "rules": RULES, "corrected": args.corrected,
+        "cues": cue_words, "rules": {count: RULES[count]
+                                 for count in args.cue_counts},
+        "corrected": args.corrected,
         "relation_checkpoint_sha256": relation_sha,
         "head_checkpoint_sha256": hashlib.sha256(head_bytes).hexdigest(),
         "groups": groups, "rows": rows,
@@ -157,6 +168,9 @@ def main() -> None:
     parser.add_argument("--relation-checkpoint", type=Path, required=True)
     parser.add_argument("--head-checkpoint", type=Path, required=True)
     parser.add_argument("--corrected", action="store_true")
+    parser.add_argument("--cue-counts", type=int, nargs="+", default=(3, 5),
+                        choices=tuple(RULES))
+    parser.add_argument("--original-cues", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     run(parser.parse_args())
 
