@@ -12,6 +12,10 @@ from ttcl.trajectory_hyperlora.feedback_relation_pretrain import (
 from ttcl.trajectory_hyperlora.probe_unseen_marker_vocab import (
     NEW_CUES, changed_source,
 )
+from ttcl.trajectory_hyperlora.probe_variable_relation_count import (
+    RULES as VARIABLE_RULES, records as variable_records,
+)
+from ttcl.trajectory_hyperlora.diagnose_majority_shortcut import diagnose
 from ttcl.trajectory_hyperlora.slot_lora_oracle_pilot import source_records
 
 
@@ -74,6 +78,33 @@ class GenericRelationTest(unittest.TestCase):
             self.assertEqual(left["observation"], right["observation"])
             self.assertEqual(left["feedback"], right["feedback"])
             self.assertNotEqual(left["action"], right["action"])
+
+    def test_variable_relation_count_counterfactual_pair(self):
+        for count, rules in VARIABLE_RULES.items():
+            for corrected in (False, True):
+                source = variable_records(rules[0], count, 1234, corrected)
+                wrong = variable_records(rules[0] ^ ((1 << count) - 1),
+                                         count, 1234, corrected)
+                self.assertEqual(len(source), 3 * count * (2 if corrected else 1))
+                for left, right in zip(source, wrong, strict=True):
+                    self.assertEqual(left["observation"], right["observation"])
+                    self.assertEqual(left["feedback"], right["feedback"])
+                    self.assertNotEqual(left["action"], right["action"])
+
+    def test_majority_shortcut_audit_rejects_constant_per_cue_output(self):
+        rows = []
+        for cue, expected in (("A", "RIGHT"), ("B", "LEFT"),
+                              ("C", "LEFT")):
+            rows.append({"cue_count": 3, "rule": 1, "source_seed": 1,
+                         "cue": cue, "expected": expected,
+                         "correct": {"first_token": "LEFT",
+                                     "correct": expected == "LEFT"},
+                         "wrong": {"first_token": "RIGHT",
+                                   "correct": expected == "RIGHT"}})
+        result = diagnose(rows)
+        self.assertEqual(result["cue_sensitive_episodes"], 0)
+        self.assertEqual(result["correct_source_success"], 2)
+        self.assertEqual(result["majority_action_baseline_success"], 2)
 
 
 if __name__ == "__main__":
