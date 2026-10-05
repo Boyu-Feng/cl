@@ -25,9 +25,10 @@ from ttcl.trajectory_hyperlora.train_xland_raw_hyperlora import (
 ACTIONS = tuple(range(5))
 
 
-def source_tensor(content: dict, device: str) -> dict[str, torch.Tensor]:
+def source_tensor(content: dict, device: str,
+                  max_source_length: int = 16) -> dict[str, torch.Tensor]:
     before, after, goals, actions, rewards, dones, state, goal, \
-        episodes, positions = encode_query(content)
+        episodes, positions = encode_query(content, max_source_length)
     n = len(before)
     return {key: torch.tensor(value, device=device).unsqueeze(0) for key, value in {
         "before": before, "after": after, "goals": goals,
@@ -37,40 +38,57 @@ def source_tensor(content: dict, device: str) -> dict[str, torch.Tensor]:
         "query_state": state, "query_goal": goal}.items()}
 
 
-def question(content: dict) -> str:
+def question(content: dict, action_count: int = 5) -> str:
     state = content["target_initial_state"]
     rows = [" ".join(f"({tile[0]},{tile[1]})" for tile in row)
             for row in state["observation"]]
+    choice_text = ("0=forward, 1=turn right, 2=turn left, 3=pick up, "
+                   "4=put down" + (", 5=toggle" if action_count == 6 else "") + ". ")
     return ("XLand-MiniGrid action prediction. The hidden task is conveyed "
             "by learned parameters. From the current local 5x5 observation, "
-            "select the expert's next action. 0=forward, 1=turn right, "
-            "2=turn left, 3=pick up, 4=put down. "
+            "select the expert's next action. " + choice_text +
             "Reply with one digit only.\nObservation:\n" +
             "\n".join(rows) + "\nAction:")
 
 
-def prompt_ids(tokenizer, content: dict) -> list[int]:
+def prompt_ids(tokenizer, content: dict, action_count: int = 5) -> list[int]:
     text = tokenizer.apply_chat_template(
-        [{"role": "user", "content": question(content)}], tokenize=False,
+        [{"role": "user", "content": question(content, action_count)}], tokenize=False,
         add_generation_prompt=True)
     return tokenizer(text, add_special_tokens=False).input_ids
 
 
-def prepare(items: list[dict], tokenizer, device: str) -> list[dict]:
+def prepare(items: list[dict], tokenizer, device: str,
+            prefix_augmentation: bool = False,
+            action_count: int = 5,
+            max_source_length: int = 16) -> list[dict]:
     prepared = []
     for item in items:
         targets = []
         for query in item["queries"]:
             content, label = checked_query(query)
-            if label not in ACTIONS:
+            if label not in range(action_count):
                 raise ValueError("Official expert action outside pilot choices")
-            targets.append({"ids": prompt_ids(tokenizer, content), "label": label})
+            targets.append({"ids": prompt_ids(tokenizer, content, action_count), "label": label})
         if not targets:
             raise ValueError("Empty task")
         content, _ = checked_query(item["queries"][0])
+        source_variants = [source_tensor(content, device,
+                                         max_source_length)]
+        if prefix_augmentation:
+            steps = content["source_episodes"][0]["steps"]
+            for length in (1, 2, 4, 8):
+                if length >= len(steps):
+                    continue
+                partial = {**content, "source_episodes": [{
+                    **content["source_episodes"][0],
+                    "steps": steps[:length]}]}
+                source_variants.append(source_tensor(partial, device,
+                                                      max_source_length))
         prepared.append({"task_id": item["task_id"],
                          "ruleset_id": item["ruleset_id"],
-                         "source": source_tensor(content, device),
+                         "source": source_variants[0],
+                         "source_variants": source_variants,
                          "targets": targets})
     return prepared
 
@@ -104,7 +122,8 @@ def evaluate(agent: QwenRawHyperLoRA, items: list[dict],
     agent.eval()
     counts = {kind: 0 for kind in ("correct", "wrong", "none")}
     changes = 0
-    confusion = {kind: {str(i): [0] * 5 for i in ACTIONS}
+    confusion = {kind: {str(i): [0] * len(choice_ids)
+                        for i in range(len(choice_ids))}
                  for kind in counts}
     with torch.no_grad():
         for item_index, item in enumerate(items):
@@ -140,6 +159,13 @@ def run(args: argparse.Namespace) -> dict:
         raise FileExistsError("Fresh result paths required")
     raw = args.annotations.read_bytes()
     annotations = json.loads(raw)
+    action_count = annotations.get("budget", {}).get("action_count", 5)
+    if action_count not in (5, 6):
+        raise ValueError("Unsupported official action count")
+    max_source_length = annotations.get("source_limit",
+        annotations.get("budget", {}).get("source_length", 16))
+    if max_source_length not in (16, 64):
+        raise ValueError("Unsupported source window length")
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
     if args.device.startswith("cuda"):
@@ -147,29 +173,47 @@ def run(args: argparse.Namespace) -> dict:
                                                    device=args.device)
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     choice_tokens = [tokenizer(str(i), add_special_tokens=False).input_ids
-                     for i in ACTIONS]
+                     for i in range(action_count)]
     if any(len(x) != 1 for x in choice_tokens):
         raise ValueError("Action labels are not single tokens")
     choice_ids = [x[0] for x in choice_tokens]
     pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
-    split = {name: prepare(annotations["split"][name], tokenizer, args.device)
+    items = {name: annotations["split"][name]
              for name in ("train", "dev", "test")}
+    if args.positive_only_train:
+        if not all("online_source_positive" in item
+                   for group in items.values() for item in group):
+            raise ValueError("Positive-only training requires reviewed online sources")
+        items["train"] = [item for item in items["train"]
+                          if item["online_source_positive"] > 0]
+    split = {name: prepare(items[name], tokenizer,
+                           args.device, args.prefix_augmentation, action_count,
+                           max_source_length)
+             for name in ("train", "dev", "test")}
+    if not split["train"] or (args.pair_weight and len(split["train"]) < 2):
+        raise ValueError("Too few train tasks after source filtering")
+    positive_dev_ids = {item["task_id"] for item in items["dev"]
+        if item.get("online_source_positive", 0) > 0}
+    if args.select_positive_dev and len(positive_dev_ids) < 2:
+        raise ValueError("Need two positive online sources on dev")
     shared_source = split["train"][0]["source"] if args.shared_source else None
     base = AutoModelForCausalLM.from_pretrained(args.model,
         torch_dtype=torch.bfloat16, local_files_only=True,
         attn_implementation="sdpa").to(args.device)
     base.config.use_cache = False
     agent = QwenRawHyperLoRA(base, args.rank, args.layers, args.width,
-                             order_invariant_source=False).to(args.device)
+        order_invariant_source=False,
+        max_source_length=max_source_length).to(args.device)
     optimizer = torch.optim.AdamW(
         (p for p in agent.parameters() if p.requires_grad), lr=args.lr)
-    best_dev, best_step, best_state, history = -1, 0, None, []
+    best_dev, best_step, best_state, history = float("-inf"), 0, None, []
     for step in range(1, args.steps + 1):
         agent.train()
         task = rng.choice(split["train"])
         batch = rng.sample(task["targets"], k=min(args.batch_size,
                                                    len(task["targets"])))
-        factors = agent.compile_adapters(shared_source or task["source"])
+        source = (shared_source or rng.choice(task["source_variants"]))
+        factors = agent.compile_adapters(source)
         output = logits(agent, batch, factors, choice_ids, pad_id, args.device)
         truth = torch.tensor([x["label"] for x in batch], device=args.device)
         correct_ce = F.cross_entropy(output, truth, reduction="none")
@@ -177,7 +221,9 @@ def run(args: argparse.Namespace) -> dict:
         if args.pair_weight:
             wrong_task = rng.choice([other for other in split["train"]
                                      if other["task_id"] != task["task_id"]])
-            wrong_factors = agent.compile_adapters(wrong_task["source"])
+            wrong_source = (rng.choice(wrong_task["source_variants"]) if
+                            args.prefix_augmentation else wrong_task["source"])
+            wrong_factors = agent.compile_adapters(wrong_source)
             wrong_output = logits(agent, batch, wrong_factors, choice_ids,
                                   pad_id, args.device)
             wrong_ce = F.cross_entropy(wrong_output, truth,
@@ -194,15 +240,21 @@ def run(args: argparse.Namespace) -> dict:
         optimizer.step()
         agent.mount(None)
         if step % args.eval_every == 0 or step == args.steps:
-            dev = evaluate(agent, split["dev"], choice_ids, pad_id,
+            dev_items = ([item for item in split["dev"]
+                if item["task_id"] in positive_dev_ids]
+                if args.select_positive_dev else split["dev"])
+            dev = evaluate(agent, dev_items, choice_ids, pad_id,
                            args.device, args.batch_size, shared_source)
             history.append({"step": step, "loss": float(loss.detach()),
                             "dev": {key: dev[key] for key in
                                     ("n", "correct", "wrong", "none",
                                      "source_swap_changes")}})
             print(json.dumps(history[-1]), flush=True)
-            if dev["correct"] > best_dev:
-                best_dev, best_step = dev["correct"], step
+            selection_score = (dev["correct"] +
+                args.contrast_selection_weight *
+                (dev["correct"] - dev["wrong"]))
+            if selection_score > best_dev:
+                best_dev, best_step = selection_score, step
                 best_state = {name: p.detach().cpu().clone()
                               for name, p in agent.named_parameters()
                               if p.requires_grad}
@@ -215,7 +267,21 @@ def run(args: argparse.Namespace) -> dict:
     final = {name: evaluate(agent, split[name], choice_ids, pad_id,
                             args.device, args.batch_size, shared_source)
              for name in ("dev", "test")}
-    result = {"protocol": "Official XLand-100B independent history prefix -> generated LoRA on frozen Qwen; target expert-action agreement on task-held-out later history; no environment rollout",
+    positive_source_final = {}
+    for name in ("dev", "test"):
+        ids = {item["task_id"] for item in items[name]
+               if item.get("online_source_positive", 0) > 0}
+        if len(ids) >= 2:
+            subset = [item for item in split[name]
+                      if item["task_id"] in ids]
+            positive_source_final[name] = evaluate(agent, subset,
+                choice_ids, pad_id, args.device, args.batch_size,
+                shared_source)
+    source_kind = ("reviewed model-generated live source" if
+                   all("online_source_positive" in item
+                       for group in items.values() for item in group)
+                   else "official XLand-100B source history")
+    result = {"protocol": source_kind + " -> generated LoRA on frozen Qwen; target expert-action agreement on task-held-out independent official history; no target environment rollout during training",
               "annotations_sha256": hashlib.sha256(raw).hexdigest(),
               "model_config_sha256": hashlib.sha256((args.model / "config.json").read_bytes()).hexdigest(),
               "seed": args.seed, "steps": args.steps,
@@ -223,6 +289,15 @@ def run(args: argparse.Namespace) -> dict:
               "lr": args.lr, "rank": args.rank, "layers": args.layers,
               "pair_weight": args.pair_weight,
               "pair_margin": args.pair_margin,
+              "contrast_selection_weight": args.contrast_selection_weight,
+              "best_dev_selection_score": best_dev,
+              "action_count": action_count,
+              "max_source_length": max_source_length,
+              "prefix_augmentation": args.prefix_augmentation,
+              "positive_only_train": args.positive_only_train,
+              "select_positive_dev": args.select_positive_dev,
+              "train_task_count": len(split["train"]),
+              "positive_source_final": positive_source_final,
               "shared_source": args.shared_source,
               "shared_source_task_id": split["train"][0]["task_id"]
                   if args.shared_source else None,
@@ -253,7 +328,11 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=.0003)
     parser.add_argument("--pair-weight", type=float, default=0.)
     parser.add_argument("--pair-margin", type=float, default=1.)
+    parser.add_argument("--contrast-selection-weight", type=float, default=0.)
     parser.add_argument("--shared-source", action="store_true")
+    parser.add_argument("--prefix-augmentation", action="store_true")
+    parser.add_argument("--positive-only-train", action="store_true")
+    parser.add_argument("--select-positive-dev", action="store_true")
     parser.add_argument("--rank", type=int, default=8)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--width", type=int, default=64)
@@ -262,6 +341,7 @@ def main() -> None:
     args = parser.parse_args()
     if (args.steps < 1 or args.eval_every < 1 or args.batch_size < 1 or
             args.lr <= 0 or args.pair_weight < 0 or
+            args.contrast_selection_weight < 0 or
             (args.shared_source and args.pair_weight) or
             not 0 < args.gpu_fraction <= 1):
         parser.error("Invalid training budget")

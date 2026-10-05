@@ -1,4 +1,4 @@
-"""JSONL bridge to the official XLand-MiniGrid medium-1m environment.
+"""JSONL bridge to a version-bound official XLand-MiniGrid environment.
 
 Run only in the isolated xminigrid/JAX environment. No expert actions or
 ruleset internals are sent to the actor.
@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import argparse
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
@@ -17,8 +18,17 @@ import xminigrid
 
 
 def main() -> None:
-    benchmark = xminigrid.load_benchmark("medium-1m")
-    env, defaults = xminigrid.make("XLand-MiniGrid-R1-13x13")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark", default="medium-1m")
+    parser.add_argument("--benchmark-path")
+    parser.add_argument("--environment", default="XLand-MiniGrid-R1-13x13")
+    args = parser.parse_args()
+    benchmark = (xminigrid.benchmarks.load_benchmark_from_path(
+        args.benchmark_path) if args.benchmark_path else
+        xminigrid.load_benchmark(args.benchmark))
+    env, defaults = xminigrid.make(args.environment)
+    reset_fn = jax.jit(env.reset)
+    step_fn = jax.jit(env.step)
     timestep = None
     params = None
     for line in sys.stdin:
@@ -28,7 +38,7 @@ def main() -> None:
                 rule_id = int(request["ruleset_id"])
                 seed = int(request["seed"])
                 params = defaults.replace(ruleset=benchmark.get_ruleset(rule_id))
-                timestep = env.reset(params, jax.random.key(seed))
+                timestep = reset_fn(params, jax.random.key(seed))
                 response = {"observation": timestep.observation.tolist(),
                             "reward": float(timestep.reward),
                             "done": int(timestep.step_type) == 2,
@@ -40,7 +50,8 @@ def main() -> None:
                 action = int(request["action"])
                 if not 0 <= action < env.num_actions(params):
                     raise ValueError("Action outside official environment")
-                timestep = env.step(params, timestep, action)
+                timestep = step_fn(params, timestep,
+                                   jax.numpy.asarray(action, dtype=jax.numpy.int32))
                 response = {"observation": timestep.observation.tolist(),
                             "reward": float(timestep.reward),
                             "done": int(timestep.step_type) == 2}

@@ -60,13 +60,14 @@ def source_steps(group: h5py.Group, max_source: int,
 
 def target_queries(group: h5py.Group, task_id: int,
                    start: int, stop: int, per_action: int,
-                   seed: int) -> tuple[list[dict] | None, str | None]:
+                   seed: int, action_count: int = len(ACTIONS)) -> tuple[list[dict] | None, str | None]:
     packed = group["states"][1, start:stop]
     experts = group["expert_actions"][1, start:stop]
     rng = random.Random(seed ^ (task_id * 1103515245))
     indices = list(range(len(experts)))
     rng.shuffle(indices)
-    selected, seen = {action: [] for action in ACTIONS}, set()
+    actions = tuple(range(action_count))
+    selected, seen = {action: [] for action in actions}, set()
     for offset in indices:
         action = int(experts[offset])
         key = packed[offset].tobytes()
@@ -82,7 +83,7 @@ def target_queries(group: h5py.Group, task_id: int,
             break
     if any(len(rows) != per_action for rows in selected.values()):
         return None, "insufficient_unique_expert_actions"
-    return [row for action in ACTIONS for row in selected[action]], None
+    return [row for action in actions for row in selected[action]], None
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -91,7 +92,8 @@ def run(args: argparse.Namespace) -> dict:
     if args.max_task_id < 1 or args.source_length < 1 or \
             args.source_length > 16 or args.per_action < 1 or \
             args.target_start < args.max_source or \
-            args.target_stop <= args.target_start:
+            args.target_stop <= args.target_start or \
+            args.action_count not in (5, 6):
         raise ValueError("Invalid bounded pilot budget")
     head = requests.head(args.url, allow_redirects=True, timeout=30)
     head.raise_for_status()
@@ -99,14 +101,17 @@ def run(args: argparse.Namespace) -> dict:
                 "content_length": int(head.headers["Content-Length"]),
                 "etag": head.headers.get("ETag"),
                 "last_modified": head.headers.get("Last-Modified")}
-    result = {"protocol": "Bounded remote XLand-100B histories; candidates, not reviewed labels",
+    result = {"protocol": "Bounded remote official XLand histories; candidates, not reviewed labels",
               "dataset_identity": identity,
+              "benchmark_id": args.benchmark_id,
+              "environment_id": args.environment_id,
               "budget": {"max_task_id": args.max_task_id,
                          "max_source": args.max_source,
                          "source_length": args.source_length,
                          "target_start": args.target_start,
                          "target_stop": args.target_stop,
                          "per_action": args.per_action,
+                         "action_count": args.action_count,
                          "seed": args.seed},
               "tasks": [], "failed_candidates": []}
     with fsspec.open(head.url, "rb", block_size=args.block_size,
@@ -115,15 +120,15 @@ def run(args: argparse.Namespace) -> dict:
             for task_id in range(args.max_task_id):
                 group = h5[str(task_id)]
                 ruleset_id = int(group.attrs["ruleset-id"])
-                if group.attrs["benchmark-id"] != "medium-1m":
+                if group.attrs["benchmark-id"] != args.benchmark_id:
                     raise ValueError("Unexpected official benchmark")
-                if group.attrs["env-id"] != "XLand-MiniGrid-R1-13x13":
+                if group.attrs["env-id"] != args.environment_id:
                     raise ValueError("Unexpected official environment")
                 source, reason = source_steps(group, args.max_source,
                                               args.source_length)
                 target, target_reason = target_queries(group, task_id,
                     args.target_start, args.target_stop, args.per_action,
-                    args.seed)
+                    args.seed, args.action_count)
                 if reason or target_reason:
                     result["failed_candidates"].append({"task_id": task_id,
                         "ruleset_id": ruleset_id,
@@ -155,12 +160,15 @@ def run(args: argparse.Namespace) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=DEFAULT_URL)
+    parser.add_argument("--benchmark-id", default="medium-1m")
+    parser.add_argument("--environment-id", default="XLand-MiniGrid-R1-13x13")
     parser.add_argument("--max-task-id", type=int, default=64)
     parser.add_argument("--max-source", type=int, default=4096)
     parser.add_argument("--source-length", type=int, default=16)
     parser.add_argument("--target-start", type=int, default=8192)
     parser.add_argument("--target-stop", type=int, default=12288)
     parser.add_argument("--per-action", type=int, default=4)
+    parser.add_argument("--action-count", type=int, default=5)
     parser.add_argument("--seed", type=int, default=20261005)
     parser.add_argument("--block-size", type=int, default=2097152)
     parser.add_argument("--output", type=Path, required=True)

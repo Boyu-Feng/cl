@@ -30,6 +30,7 @@ def run(args: argparse.Namespace) -> dict:
     raw = args.candidates.read_bytes()
     candidate = json.loads(raw)
     budget = candidate["budget"]
+    actions = tuple(range(budget.get("action_count", len(ACTIONS))))
     ids, rulesets = set(), set()
     tasks = []
     for item in candidate["tasks"]:
@@ -43,7 +44,7 @@ def run(args: argparse.Namespace) -> dict:
         if (digest(source) != item["source_sha256"] or
                 digest(queries) != item["target_sha256"] or
                 not 1 <= len(source) <= budget["source_length"] or
-                len(queries) != len(ACTIONS) * budget["per_action"] or
+                len(queries) != len(actions) * budget["per_action"] or
                 item["source_history_id"] == item["target_history_id"]):
             raise ValueError("Source or target provenance changed")
         source_indices = [step["transition_index"] for step in source]
@@ -72,7 +73,7 @@ def run(args: argparse.Namespace) -> dict:
             index = row["transition_index"]
             if (row["history_index"] != item["target_history_id"] or
                     not budget["target_start"] <= index < budget["target_stop"] or
-                    index in seen_indices or label not in ACTIONS or
+                index in seen_indices or label not in actions or
                     not valid_state(row["target_state"])):
                 raise ValueError("Invalid official expert target")
             seen_indices.add(index)
@@ -92,7 +93,7 @@ def run(args: argparse.Namespace) -> dict:
                 "target_history_id": item["target_history_id"],
                 "target_transition_index": index})
         if any(labels.count(action) != budget["per_action"]
-               for action in ACTIONS):
+               for action in actions):
             raise ValueError("Targets are not action-balanced")
         tasks.append({"task_id": task_id, "ruleset_id": ruleset_id,
                       "source_history_id": item["source_history_id"],
@@ -111,9 +112,12 @@ def run(args: argparse.Namespace) -> dict:
     split = {"train": tasks[:n - n_dev - n_test],
              "dev": tasks[n - n_dev - n_test:n - n_test],
              "test": tasks[n - n_test:]}
-    result = {"protocol": "New reviewed official XLand-100B expert-action targets with exact input-content bindings; task/ruleset-disjoint split",
+    result = {"protocol": "New reviewed official XLand expert-action targets with exact input-content bindings; task/ruleset-disjoint split",
               "candidates_sha256": hashlib.sha256(raw).hexdigest(),
               "dataset_identity": candidate["dataset_identity"],
+              "benchmark_id": candidate.get("benchmark_id", "medium-1m"),
+              "environment_id": candidate.get("environment_id",
+                                               "XLand-MiniGrid-R1-13x13"),
               "budget": budget, "split_seed": args.seed,
               "failed_candidates": candidate["failed_candidates"],
               "split": split}

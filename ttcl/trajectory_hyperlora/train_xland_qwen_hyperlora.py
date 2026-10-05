@@ -70,13 +70,15 @@ def group(data: dict, index: int) -> dict:
 
 class QwenRawHyperLoRA(nn.Module):
     def __init__(self, base: nn.Module, rank: int = 8, layers: int = 2,
-                 width: int = 64, order_invariant_source: bool = False) -> None:
+                 width: int = 64, order_invariant_source: bool = False,
+                 max_source_length: int = 16) -> None:
         super().__init__()
         for parameter in base.parameters():
             parameter.requires_grad_(False)
         self.base = base
         self.encoder = RawHyperLoRA(width=width, rank=rank,
-            order_invariant_source=order_invariant_source)
+            order_invariant_source=order_invariant_source,
+            max_source_length=max_source_length)
         for module in (self.encoder.hyper, self.encoder.policy,
                        self.encoder.base_head, self.encoder.lora_a):
             for parameter in module.parameters():

@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 
 from ttcl.trajectory_hyperlora.evaluate_xland_official_live import (
-    digest, load_actor, select, sha256,
+    digest, load_actor, select, selected_source_steps, sha256,
 )
 from ttcl.trajectory_hyperlora.train_xland_official_history_hyperlora import (
     source_tensor,
@@ -51,16 +51,16 @@ def run(args):
                 if kind == "reviewed_positive":
                     episodes = reviewed[row["ruleset_id"]]
                 else:
-                    steps = [{key: step[key] for key in
-                        ("state", "action", "next_state", "reward", "done")}
-                        for step in source["source"]["steps"]]
+                    steps, _ = selected_source_steps(
+                        source["source"]["steps"],
+                        agent.encoder.max_source_length)
                     episodes = [{"goal": [0, 0], "steps": steps}]
                 content = {"source_episodes": episodes,
                     "target_initial_state": {"observation":
                         target_observation, "pocket": [0, 0]},
                     "goal": [0, 0]}
-                factors = agent.compile_adapters(source_tensor(content,
-                                                                 args.device))
+                factors = agent.compile_adapters(source_tensor(
+                    content, args.device, agent.encoder.max_source_length))
                 source_hash = digest(content)
             action, prompt_hash, logits = select(agent, tokenizer, choices,
                 target_observation, factors, args.device)

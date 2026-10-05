@@ -32,7 +32,7 @@ def state_tensor(state: dict) -> list[int]:
             for value in tile] + list(state["pocket"])
 
 
-def encode_query(content: dict) -> tuple[list[list[int]], list[list[int]],
+def encode_query(content: dict, max_source_length: int = 16) -> tuple[list[list[int]], list[list[int]],
                                          list[list[int]], list[int],
                                          list[float], list[float], list[int],
                                          list[int], list[int], list[int]]:
@@ -48,8 +48,8 @@ def encode_query(content: dict) -> tuple[list[list[int]], list[list[int]],
             dones.append(float(step["done"]))
             episodes.append(episode_index)
             step_positions.append(step_index)
-    if not before or len(before) > 16:
-        raise ValueError("Expected 1..16 public trajectory steps")
+    if not before or len(before) > max_source_length:
+        raise ValueError(f"Expected 1..{max_source_length} public trajectory steps")
     return (before, after, goals, actions, rewards, dones,
             state_tensor(content["target_initial_state"]), content["goal"],
             episodes, step_positions)
@@ -113,9 +113,11 @@ def make_split(items: list[dict], device: str) -> dict[str, torch.Tensor]:
 
 class RawHyperLoRA(nn.Module):
     def __init__(self, width: int = 64, rank: int = 8,
-                 order_invariant_source: bool = False) -> None:
+                 order_invariant_source: bool = False,
+                 max_source_length: int = 16) -> None:
         super().__init__()
         self.rank = rank
+        self.max_source_length = max_source_length
         self.order_invariant_source = order_invariant_source
         # Shared, generic value encoder. No named object/action/rule slots.
         self.value = nn.Embedding(64, 16)
@@ -131,7 +133,7 @@ class RawHyperLoRA(nn.Module):
                                            norm_first=True)
         self.trajectory = nn.TransformerEncoder(layer, 2, enable_nested_tensor=False)
         self.cls = nn.Parameter(torch.zeros(1, 1, width))
-        self.position = nn.Embedding(17, width)
+        self.position = nn.Embedding(max_source_length + 1, width)
         self.hyper = nn.Sequential(nn.LayerNorm(width), nn.Linear(width, width),
                                    nn.Tanh(), nn.Linear(width, 6 * rank))
         nn.init.normal_(self.hyper[-1].weight, std=.02)
