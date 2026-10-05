@@ -40,9 +40,11 @@ W'_\ell=W_\ell+\frac{\alpha}{r}B_\ell A_\ell.
 
 本任务仍固定四个合成标记、`LEFT/RIGHT` 二选一动作、每条轨迹每类三次示范，以及短程公开反馈。模型结构没有语义槽，但训练分布仍很窄；不具备任意新动作或任务的开放式技能学习证据。开发集的短提示词让 LoRA 各组按严格首动作 token 判分全为 **0/128**，提示鲁棒性未解决。多轮实验使用并查看同一奇校验测试规则，因此表中正结果是**机制探索**，不是冻结的最终确认成绩。ALFWorld、CLBench 和在线环境奖励 RL 均尚未对本新版本运行。
 
+提交前另做只读词汇迁移探针：冻结两个反馈感知模型，把来源轨迹与目标问题里的四个标记一致替换为训练未出现的 `OMEGA/SIGMA/THETA/KAPPA`，不更新参数。干净来源及“无效→纠正”来源在两个种子上都得到无 LoRA **64/128**、正确来源 **96/128**、错来源 **32/128**；同题换历史 128/128 次首动作改变。该探针说明模型没有只能识别原四个标记字符串，但仍是相同的四条件二动作结构、相同的规则组合与评分模板；新标记由研究过程中选定，不是预先冻结的新任务族确认。
+
 下一步应在新的任务族中预先固定提示、轨迹长度、动作词汇和整套隐藏规则划分，保留正确／错／公共／无参数四臂及文本轨迹对照。只有新族多种子仍能显示正确来源的独有收益，才在已审核 ALFWorld `train` 来源—目标配对上训练反馈门控和低维 LoRA 残差；正式测试保持官方环境 `won`、任务分割及冻结预算。针对 ALFWorld 51 道训练配对只有 7 道三臂终局奖励不同这一稀疏性，应先用不泄漏目标答案的过程反馈预热，再以真实下一题增益和负迁移惩罚微调，而不是直接对高维生成头做高方差终局 REINFORCE。
 
-代码为 `general_relation_hyperlora.py`、`generic_relation_pretrain.py`、`pretrained_relation_hyperlora.py`、`feedback_relation_pretrain.py`、`diagnose_generic_relation.py`、`probe_generic_corrections.py` 和 `export_pretrained_relation_lora.py`。本机 ignored 原始记录与权重在 `results/trajectory_hyperlora/{general_relation_20261005,generic_relation_pretrain_20261005,pretrained_relation_lora_20261005,feedback_relation_20261005}/`；实验只使用空闲 GPU 3，单进程显存上限 35%，没有停止或修改其他卡上的实验。
+代码为 `general_relation_hyperlora.py`、`generic_relation_pretrain.py`、`pretrained_relation_hyperlora.py`、`feedback_relation_pretrain.py`、`diagnose_generic_relation.py`、`probe_generic_corrections.py`、`probe_unseen_marker_vocab.py` 和 `export_pretrained_relation_lora.py`。本机 ignored 原始记录与权重在 `results/trajectory_hyperlora/{general_relation_20261005,generic_relation_pretrain_20261005,pretrained_relation_lora_20261005,feedback_relation_20261005}/`；实验只使用空闲 GPU 3，单进程显存上限 35%，没有停止或修改其他卡上的实验。
 
 复跑顺序以种子 42 为例，需先安装 `EXPERIMENTS.md` §4 的公开依赖，并为 `RUN_DIR` 选未使用过的 ignored 结果目录；程序拒绝覆盖既有产物：
 
@@ -63,3 +65,5 @@ CUDA_VISIBLE_DEVICES=3 ttcl/.runtime/alf_delta_env/bin/python -m ttcl.trajectory
 ```
 
 主要结果 JSON 的 SHA-256：关系预训练种子 42/43 为 `32fff58c5c84ea67ae7c4ad0f8d5e5f5c145186ed333081e0be8b919e1792f20`、`8d1ac1e7dca0ee1f0e107e65c980837922a12676c318d5f6a6e2b6da32e2a18c`；干净历史 LoRA 配对训练 42/43 为 `d1e50636401801a507df795cdf09781525fe511f8d8409b6783c168416718330`、`5358b01026cabee84e3b4a9a7e1124fe2c8b36998ebf1ebcead956fff9cb02c5`；冻结关系核心的反馈读出 42/43 为 `1bb52f7706331289a2ffa47e92079831fe08e81ac40a00f22b7aa219e3ff20e9`、`0359fcf9775361866d94b6b2a93e400c7a21c5a30cdd64e0d9fecdab00bd4b56`；混合历史 LoRA 42/43 为 `108a1a1b2b36a7ab13f4f09415009580c320a3bf479c93f37840d725ed183157`、`ed056f755698c85400d29c5918f3d196a9fa6ebca2af151bd0f0569ebd321f06`；标准纠错探针 42/43 为 `19fe774f73b52693f0d68cc4457cca40e6cb161ecd5857198867edbb774ab7cd`、`f35f537a00ecc6e709d78dbe0ab213771bacc3925f488b571ca892c73ecfa367`。
+
+新标记词探针四份 JSON SHA-256：种子 42 干净／纠错为 `6f7bc1477e98f543f37af2dee77dba4400ee4f7b25db3e9e7885cf19a56483ca`、`fd7fcd09b142bd9cce6e97b8afa3c449e0c72fa1f9dfb094fbdb19e27a6ec0ee`；种子 43 为 `e1be7fda6de671787f774880a0ad1ba87fd26b4ba162426c1beee20af3ae2d74`、`b0189857a6b9c144bc2d391cc2fc0cebcc1908e65a59240ba46b421b998b2f23`。

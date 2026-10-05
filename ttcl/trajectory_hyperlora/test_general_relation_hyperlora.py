@@ -9,6 +9,9 @@ from torch.nn import functional as F
 from ttcl.trajectory_hyperlora.feedback_relation_pretrain import (
     FeedbackRelationMemory, add_corrections,
 )
+from ttcl.trajectory_hyperlora.probe_unseen_marker_vocab import (
+    NEW_CUES, changed_source,
+)
 from ttcl.trajectory_hyperlora.slot_lora_oracle_pilot import source_records
 
 
@@ -60,6 +63,17 @@ class GenericRelationTest(unittest.TestCase):
         self.assertIsNotNone(memory.feedback[1].weight.grad)
         self.assertGreater(float(memory.feedback[1].weight.grad.abs().sum()), 0)
         self.assertIsNone(embedding.weight.grad)
+
+    def test_unseen_vocabulary_swap_preserves_episode_pairing(self):
+        source = changed_source(3, 19, corrected=True)
+        wrong = changed_source(3 ^ 15, 19, corrected=True)
+        self.assertEqual(len(source), 24)
+        self.assertTrue(all(any(cue in row["observation"] for cue in NEW_CUES)
+                            for row in source))
+        for left, right in zip(source, wrong, strict=True):
+            self.assertEqual(left["observation"], right["observation"])
+            self.assertEqual(left["feedback"], right["feedback"])
+            self.assertNotEqual(left["action"], right["action"])
 
 
 if __name__ == "__main__":
