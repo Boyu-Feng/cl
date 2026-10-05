@@ -1,0 +1,2 @@
+# Add to the pinned Python 3.12 mainline environment for XLand-100B HDF5 access.
+h5py==3.14.0
