@@ -261,6 +261,7 @@ def train(args):
             data_root=args.data_root, split=source_split))
         source_rows_by_game = {row["target_game"]: row for row, _ in sources}
         source_by_game = {row["target_game"]: note for row, note in sources}
+        on_policy = dataset.get("on_policy_rollouts_sha256") is not None
         if (dataset["sibling_candidates_sha256"] !=
                 file_hash(args.sibling_candidates) or
                 dataset["sibling_source_review_sha256"] !=
@@ -268,9 +269,10 @@ def train(args):
                 dataset["first_attempts_sha256"] !=
                 (file_hash(args.first_attempts)
                  if source_split == "train" else None) or
-                len(dataset["tasks"]) != len(sources) or
+                (not on_policy and len(dataset["tasks"]) != len(sources)) or
+                (on_policy and len(dataset["tasks"]) > len(sources)) or
                 len({task["target_game"] for task in dataset["tasks"]}) !=
-                    len(sources) or
+                    len(dataset["tasks"]) or
                 any(task["target_game"] not in source_by_game or
                     task["target_game_sha256"] !=
                         source_rows_by_game[task["target_game"]]["target_game_sha256"] or
@@ -285,10 +287,38 @@ def train(args):
                     for task in dataset["tasks"])):
             raise ValueError("Sibling train task/source bindings changed")
         source_lineage_ok = True
-        if source_split == "train_large" and args.advantage_bonus:
+        if (source_split == "train_large" and args.advantage_bonus and
+                not on_policy):
             raise ValueError("Large sibling targets lack own-attempt reward; set --advantage-bonus 0")
         wrong_by_game = {task["target_game"]: task["wrong_records"]
                          for task in dataset["tasks"]}
+        if on_policy:
+            if (args.teacher_mode != "on_policy_best" or
+                    args.on_policy_rollouts is None or
+                    dataset["on_policy_rollouts_sha256"] !=
+                        file_hash(args.on_policy_rollouts) or
+                    review.get("on_policy_rollouts_sha256") !=
+                        file_hash(args.on_policy_rollouts)):
+                raise ValueError("On-policy reward rollout changed")
+            from ttcl.trajectory_hyperlora.prepare_alf_onpolicy_supervision import (
+                build as build_on_policy,
+            )
+            on_policy_args = argparse.Namespace(
+                rollouts=args.on_policy_rollouts,
+                checkpoint=args.checkpoint,
+                candidates=args.sibling_candidates,
+                source_review=args.sibling_source_review,
+                retry_candidates=args.candidates,
+                retry_review=args.review,
+                all_source_review=args.all_source_review,
+                data_root=args.data_root,
+                expected_games=args.on_policy_expected_games,
+                per_family_limit=args.on_policy_per_family_limit,
+                minimum_winners=args.on_policy_minimum_winners)
+            if dataset != build_on_policy(on_policy_args):
+                raise ValueError("On-policy winning actions changed")
+        elif args.teacher_mode == "on_policy_best":
+            raise ValueError("On-policy training lacks reviewed reward rollouts")
         if dataset.get("source_replay_audit_sha256") is not None:
             if (args.teacher_mode != "replay_or_walkthrough" or
                     args.source_replay_audit is None or
@@ -592,7 +622,10 @@ def train(args):
                 wrong_match - own_match)
         else:
             match_contrast = ce.new_zeros(())
-        if source_scope in ("all_first_attempts", "sibling_expert"):
+        if dataset.get("on_policy_rollouts_sha256") is not None:
+            advantage = max(0.0, task["teacher_utility"] -
+                            task["baseline_utility"])
+        elif source_scope in ("all_first_attempts", "sibling_expert"):
             advantage = (max(0.0, task["teacher_utility"] -
                              task["own_utility"])
                 if task["own_utility"] is not None else 0.0)
@@ -657,6 +690,9 @@ def train(args):
               "source_replay_audit_sha256": (
                   file_hash(args.source_replay_audit)
                   if args.source_replay_audit is not None else None),
+              "on_policy_rollouts_sha256": (
+                  file_hash(args.on_policy_rollouts)
+                  if args.on_policy_rollouts is not None else None),
               "focus_probability": args.focus_probability,
               "source_contrast_weight": args.source_contrast_weight,
               "source_contrast_margin": args.source_contrast_margin,
@@ -756,6 +792,10 @@ def main():
     parser.add_argument("--sibling-candidates", type=Path)
     parser.add_argument("--sibling-source-review", type=Path)
     parser.add_argument("--source-replay-audit", type=Path)
+    parser.add_argument("--on-policy-rollouts", type=Path)
+    parser.add_argument("--on-policy-expected-games", type=int, default=240)
+    parser.add_argument("--on-policy-per-family-limit", type=int, default=40)
+    parser.add_argument("--on-policy-minimum-winners", type=int, default=20)
     parser.add_argument("--labels", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_retry_reward_labels_20261006.json"))
     parser.add_argument("--label-review", type=Path, default=Path(
@@ -764,7 +804,8 @@ def main():
     parser.add_argument("--gpu-fraction", type=float, default=.65)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--teacher-mode", choices=("retry", "walkthrough",
-                                                  "replay_or_walkthrough"),
+                                                  "replay_or_walkthrough",
+                                                  "on_policy_best"),
                         default="retry")
     parser.add_argument("--steps", type=int, default=400)
     parser.add_argument("--lr", type=float, default=.00003)
@@ -808,6 +849,9 @@ def main():
     if (args.steps < 1 or args.log_every < 1 or args.lr <= 0 or
             args.anchor_weight < 0 or args.advantage_bonus < 0 or
             args.replay_advantage_bonus < 0 or
+            args.on_policy_expected_games < 1 or
+            args.on_policy_per_family_limit < 1 or
+            args.on_policy_minimum_winners < 1 or
             (args.replay_advantage_bonus and
              args.teacher_mode != "replay_or_walkthrough") or
             args.source_contrast_weight < 0 or args.source_contrast_margin < 0 or
@@ -828,8 +872,9 @@ def main():
              args.source_truncation != "head_tail") or
             not 0 < args.gpu_fraction <= 1):
         parser.error("Invalid reward-distillation budget")
-    if args.command != "train" and args.teacher_mode == "replay_or_walkthrough":
-        parser.error("Replay-selected labels use prepare_alf_replay_supervision")
+    if args.command != "train" and args.teacher_mode in (
+            "replay_or_walkthrough", "on_policy_best"):
+        parser.error("External reviewed reward labels require their dedicated preparer")
     if args.command == "prepare":
         prepare(args)
     elif args.command == "review":
