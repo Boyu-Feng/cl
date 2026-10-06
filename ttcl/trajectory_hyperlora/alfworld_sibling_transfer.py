@@ -128,7 +128,8 @@ def prepare(args):
         rows.append(row)
     result = {"protocol": "Frozen ALFWorld train or train-domain development targets; expert source is another trial of the same task directory, wrong expert source is another directory of the same family; development target expert content never read",
         "split": args.split,
-        "large_offset": args.large_offset if args.split == "train_large" else 0,
+        **({"large_offset": args.large_offset}
+           if args.split == "train_large" and args.large_offset else {}),
         "retry_candidates_sha256": file_hash(args.retry_candidates),
         "retry_review_sha256": file_hash(args.review),
         "all_source_review_sha256": file_hash(args.all_source_review),
