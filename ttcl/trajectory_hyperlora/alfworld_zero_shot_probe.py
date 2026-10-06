@@ -41,7 +41,8 @@ def source_records(episode: dict) -> list[dict[str, str]]:
 
 
 def load_agent(model_path: Path, checkpoint_path: Path, device: str,
-               gpu_fraction: float):
+               gpu_fraction: float,
+               context_mode_override: str | None = None):
     if device.startswith("cuda"):
         torch.cuda.set_per_process_memory_fraction(gpu_fraction, device=device)
     tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
@@ -49,14 +50,21 @@ def load_agent(model_path: Path, checkpoint_path: Path, device: str,
         str(model_path), torch_dtype=torch.bfloat16, local_files_only=True,
         attn_implementation="sdpa").to(device)
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    if checkpoint["source_encoder"] != "raw":
-        raise ValueError("ALFWorld probe needs a raw-trajectory encoder checkpoint")
+    if checkpoint["source_encoder"] not in ("raw", "contextual_lm"):
+        raise ValueError("ALFWorld probe needs a supported trajectory encoder checkpoint")
+    if (checkpoint["source_encoder"] == "contextual_lm" and
+            checkpoint.get("encoder_kind") != "contextual"):
+        raise ValueError("Contextual source checkpoint has incompatible encoder kind")
     agent = DirectRelationHyperLoRA(model, rank=checkpoint["rank"],
                                     layers=checkpoint["layers"],
                                     encoder_kind=checkpoint.get(
                                         "encoder_kind", "covariance"),
                                     relation_bottleneck=checkpoint.get(
-                                        "relation_bottleneck", "none")).to(device)
+                                        "relation_bottleneck", "none"),
+                                    context_mode=(context_mode_override or
+                                        checkpoint.get("context_mode", "none")),
+                                    context_strength=checkpoint.get(
+                                        "context_strength")).to(device)
     agent.model.generation_config.temperature = 1.0
     agent.model.generation_config.top_p = 1.0
     agent.model.generation_config.top_k = 50
@@ -120,7 +128,8 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 *, adapter: bool, device: str, max_steps: int,
                 max_new_tokens: int,
                 constrain_actions: bool = False,
-                fixed_adapter: list[torch.Tensor] | None = None) -> dict:
+                fixed_adapter: list[torch.Tensor] | None = None,
+                memory_text: str | None = None) -> dict:
     if adapter and fixed_adapter is not None:
         raise ValueError("Choose trajectory adapter or fixed adapter")
     with torch.no_grad():
@@ -139,7 +148,10 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
         state = env.reset()
         initial_observation = str(state["feedback"])
         initial_commands = list(state["admissible_commands"])
-        messages = [{"role": "system", "content": ACTOR_SYSTEM}]
+        system = ACTOR_SYSTEM
+        if memory_text:
+            system += "\n\nPrior attempt record:\n" + memory_text
+        messages = [{"role": "system", "content": system}]
         for turn in range(max_steps):
             available = list(state["admissible_commands"])
             messages.append({"role": "user", "content": str(state["feedback"]) +
@@ -158,6 +170,7 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 break
         return {"status": "complete", "reward": float(bool(state["won"])),
                 "steps": len(trajectory), "initial_observation": initial_observation,
+                "memory_sha256": hashlib.sha256((memory_text or "").encode()).hexdigest(),
                 "initial_commands_sha256": hashlib.sha256(json.dumps(
                     initial_commands).encode()).hexdigest(),
                 "invalid_commands": sum(not step["valid"] for step in trajectory),

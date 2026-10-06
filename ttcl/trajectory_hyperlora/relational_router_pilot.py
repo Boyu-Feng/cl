@@ -70,18 +70,43 @@ def add_rejected_attempts(steps: list[dict[str, str]],
 
 
 def tokenize_records(tokenizer: object, steps: list[dict[str, str]], device: str,
-                     max_tokens: int = 40) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+                     max_tokens: int = 40,
+                     truncation_mode: str = "head",
+                     repeat_initial_observation: bool = False
+                     ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
     if not steps or any(not all(step.get(key) for key in
                             ("observation", "action", "feedback")) for step in steps):
         raise ValueError("Completed steps need observation, action, and feedback")
+    if max_tokens < 2 or truncation_mode not in ("head", "head_tail"):
+        raise ValueError("Invalid trajectory tokenization budget or mode")
+    if repeat_initial_observation and truncation_mode != "head_tail":
+        raise ValueError("Repeated initial observation needs head-tail truncation")
     output = {}
     for key in ("observation", "action", "feedback"):
-        encoded = tokenizer([step[key] for step in steps],
-                            add_special_tokens=False, padding=True,
-                            truncation=True, max_length=max_tokens,
-                            return_tensors="pt")
-        output[key] = (encoded.input_ids.to(device),
-                       encoded.attention_mask.to(device))
+        texts = [step[key] for step in steps]
+        if key == "observation" and repeat_initial_observation:
+            texts = [text + "\n" + steps[0]["observation"] for text in texts]
+        if truncation_mode == "head":
+            encoded = tokenizer(texts, add_special_tokens=False, padding=True,
+                                truncation=True, max_length=max_tokens,
+                                return_tensors="pt")
+            output[key] = (encoded.input_ids.to(device),
+                           encoded.attention_mask.to(device))
+        else:
+            full = tokenizer(texts, add_special_tokens=False).input_ids
+            head = max_tokens // 2
+            tail = max_tokens - head
+            retained = [ids if len(ids) <= max_tokens
+                        else ids[:head] + ids[-tail:] for ids in full]
+            width = max(map(len, retained))
+            pad = tokenizer.pad_token_id
+            if pad is None:
+                raise ValueError("Head-tail trajectory tokenization needs a pad token")
+            ids = torch.tensor([row + [pad] * (width - len(row))
+                                for row in retained], device=device)
+            mask = torch.tensor([[1] * len(row) + [0] * (width - len(row))
+                                 for row in retained], device=device)
+            output[key] = ids, mask
     return output
 
 

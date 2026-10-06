@@ -121,15 +121,25 @@ class DirectRelationHyperLoRA(nn.Module):
     def __init__(self, model: nn.Module, rank: int = 4,
                  layers: int = 2, width: int = 24,
                  encoder_kind: str = "covariance",
-                 relation_bottleneck: str = "none") -> None:
+                 relation_bottleneck: str = "none",
+                 context_mode: str = "none",
+                 context_strength: float | None = None) -> None:
         super().__init__()
         if encoder_kind not in ("covariance", "slots", "token_slots",
-                                "factorized"):
+                                "factorized", "contextual"):
             raise ValueError(f"Unknown source encoder: {encoder_kind}")
         if relation_bottleneck not in ("none", "soft", "hard"):
             raise ValueError(f"Unknown relation bottleneck: {relation_bottleneck}")
+        if context_mode not in ("none", "initial"):
+            raise ValueError(f"Unknown initial-context mode: {context_mode}")
+        if context_strength is not None and not 0 <= context_strength <= 1:
+            raise ValueError("Initial-context strength must be between zero and one")
         self.encoder_kind = encoder_kind
         self.relation_bottleneck = relation_bottleneck
+        self.context_mode = context_mode
+        self.context_strength = (float(context_strength)
+            if context_strength is not None else
+            1.0 if context_mode == "initial" else 0.0)
         self.model = model
         for parameter in model.parameters():
             parameter.requires_grad_(False)
@@ -139,6 +149,10 @@ class DirectRelationHyperLoRA(nn.Module):
             self.latent = nn.Sequential(nn.LayerNorm(width * width + width),
                                         nn.Linear(width * width + width, 128),
                                         nn.Tanh())
+        elif encoder_kind == "contextual":
+            self.contextual_latent = nn.Sequential(
+                nn.LayerNorm(model.get_input_embeddings().embedding_dim),
+                nn.Linear(model.get_input_embeddings().embedding_dim, 128))
         else:
             self.slot_queries = nn.Parameter(torch.randn(len(CUES), width))
             self.slot_latent = nn.Sequential(nn.LayerNorm(len(CUES) * width),
@@ -148,6 +162,11 @@ class DirectRelationHyperLoRA(nn.Module):
         # This oracle branch isolates LoRA generation from trajectory parsing.
         self.oracle_latent = nn.Linear(len(CUES), 128, bias=False)
         self.relation_head = nn.Linear(128, len(CUES))
+        if encoder_kind == "contextual":
+            for module in (self.encoder, self.oracle_latent,
+                           self.relation_head):
+                for parameter in module.parameters():
+                    parameter.requires_grad_(False)
         if encoder_kind == "factorized":
             self.cue_head = nn.Linear(width, len(CUES))
             self.action_head = nn.Linear(width, 1)
@@ -163,6 +182,11 @@ class DirectRelationHyperLoRA(nn.Module):
             self.b_heads.append(head)
 
     def encode(self, fields: dict) -> torch.Tensor:
+        if self.encoder_kind == "contextual":
+            vector = fields["contextual"]
+            if vector.ndim != 2 or vector.shape[0] != 1:
+                raise ValueError("Contextual source must be one pooled episode vector")
+            return self.contextual_latent(vector.float())
         encoder = self.encoder
         observation = encoder.observation(encoder.field_mean(fields["observation"]))
         action_vector = encoder.action(encoder.field_mean(fields["action"]))
@@ -188,6 +212,8 @@ class DirectRelationHyperLoRA(nn.Module):
             return self.slot_latent(slot_actions.reshape(1, -1))
         covariance = centered_relation(observation, action_vector, feedback)
         action_mean = (action_vector * feedback).mean(0, keepdim=True)
+        if self.context_mode == "initial":
+            action_mean = action_mean + self.context_strength * observation[:1]
         return self.latent(torch.cat((covariance, action_mean), dim=-1))
 
     def set_source(self, fields: dict | None,
