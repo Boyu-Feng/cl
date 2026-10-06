@@ -77,9 +77,10 @@ def large_train_targets(args):
     for family in sorted(groups):
         ordered = sorted(groups[family], key=lambda row: digest([
             "large_train_directory", row["target_game"]]))
-        if len(ordered) < args.per_family:
+        if len(ordered) < args.large_offset + args.per_family:
             raise ValueError(f"Too few isolated train directories: {family}")
-        chosen.extend(ordered[:args.per_family])
+        chosen.extend(ordered[args.large_offset:
+                              args.large_offset + args.per_family])
     if len(chosen) != 6 * args.per_family:
         raise ValueError("Expanded sibling training needs all six families")
     return chosen
@@ -127,6 +128,7 @@ def prepare(args):
         rows.append(row)
     result = {"protocol": "Frozen ALFWorld train or train-domain development targets; expert source is another trial of the same task directory, wrong expert source is another directory of the same family; development target expert content never read",
         "split": args.split,
+        "large_offset": args.large_offset if args.split == "train_large" else 0,
         "retry_candidates_sha256": file_hash(args.retry_candidates),
         "retry_review_sha256": file_hash(args.review),
         "all_source_review_sha256": file_hash(args.all_source_review),
@@ -168,6 +170,8 @@ def checked_review(args):
     candidates = json.loads(args.candidates.read_text())
     review = json.loads(args.source_review.read_text())
     if (candidates.get("split", "dev") != args.split or
+            candidates.get("large_offset", 0) !=
+                getattr(args, "large_offset", 0) or
             candidates["retry_candidates_sha256"] !=
             file_hash(args.retry_candidates) or
             candidates["retry_review_sha256"] != file_hash(args.review) or
@@ -560,6 +564,8 @@ def main():
     parser.add_argument("--split", choices=("train", "train_large", "dev"),
                         default="dev")
     parser.add_argument("--per-family", type=int, default=20)
+    parser.add_argument("--large-offset", type=int, default=0,
+                        help="Skip this many sorted train directories per family")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--per-family-limit", type=int, default=0)
     parser.add_argument("--source-max-tokens", type=int, default=40)
@@ -574,6 +580,7 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if (args.limit < 0 or args.per_family_limit < 0 or args.per_family < 1 or
+            args.large_offset < 0 or
             args.source_max_tokens < 2 or
             args.contextual_source_max_tokens < 2 or
             not 0 < args.gpu_fraction <= 1):
