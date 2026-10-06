@@ -74,15 +74,19 @@ def large_train_targets(args):
             "input_content_sha256": digest([
                 "large_train_target", relative, sha])})
     chosen = []
-    for family in sorted(groups):
+    families = ([args.family] if getattr(args, "family", None) else sorted(groups))
+    for family in families:
+        if family not in groups:
+            raise ValueError(f"Unknown ALFWorld train family: {family}")
         ordered = sorted(groups[family], key=lambda row: digest([
             "large_train_directory", row["target_game"]]))
         if len(ordered) < args.large_offset + args.per_family:
             raise ValueError(f"Too few isolated train directories: {family}")
         chosen.extend(ordered[args.large_offset:
                               args.large_offset + args.per_family])
-    if len(chosen) != 6 * args.per_family:
-        raise ValueError("Expanded sibling training needs all six families")
+    if len(chosen) != len(families) * args.per_family or (
+            not getattr(args, "family", None) and len(families) != 6):
+        raise ValueError("Expanded sibling selection has incomplete families")
     return chosen
 
 
@@ -130,6 +134,7 @@ def prepare(args):
         "split": args.split,
         **({"large_offset": args.large_offset}
            if args.split == "train_large" and args.large_offset else {}),
+        **({"family": args.family} if getattr(args, "family", None) else {}),
         "retry_candidates_sha256": file_hash(args.retry_candidates),
         "retry_review_sha256": file_hash(args.review),
         "all_source_review_sha256": file_hash(args.all_source_review),
@@ -173,6 +178,7 @@ def checked_review(args):
     if (candidates.get("split", "dev") != args.split or
             candidates.get("large_offset", 0) !=
                 getattr(args, "large_offset", 0) or
+            candidates.get("family") != getattr(args, "family", None) or
             candidates["retry_candidates_sha256"] !=
             file_hash(args.retry_candidates) or
             candidates["retry_review_sha256"] != file_hash(args.review) or
@@ -572,6 +578,8 @@ def main():
     parser.add_argument("--per-family", type=int, default=20)
     parser.add_argument("--large-offset", type=int, default=0,
                         help="Skip this many sorted train directories per family")
+    parser.add_argument("--family", type=str,
+                        help="Select one train_large task family for a separate confirmation set")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--per-family-limit", type=int, default=0)
     parser.add_argument("--source-max-tokens", type=int, default=40)
@@ -589,6 +597,7 @@ def main():
     args = parser.parse_args()
     if (args.limit < 0 or args.per_family_limit < 0 or args.per_family < 1 or
             args.large_offset < 0 or args.actor_history_turns < 0 or
+            (args.family is not None and args.split != "train_large") or
             args.source_max_tokens < 2 or
             args.contextual_source_max_tokens < 2 or
             not 0 < args.gpu_fraction <= 1):
