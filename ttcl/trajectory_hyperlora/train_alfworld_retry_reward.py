@@ -289,6 +289,28 @@ def train(args):
             raise ValueError("Large sibling targets lack own-attempt reward; set --advantage-bonus 0")
         wrong_by_game = {task["target_game"]: task["wrong_records"]
                          for task in dataset["tasks"]}
+        if dataset.get("source_replay_audit_sha256") is not None:
+            if (args.teacher_mode != "replay_or_walkthrough" or
+                    args.source_replay_audit is None or
+                    dataset["source_replay_audit_sha256"] !=
+                        file_hash(args.source_replay_audit) or
+                    review.get("source_replay_audit_sha256") !=
+                        file_hash(args.source_replay_audit)):
+                raise ValueError("Source-replay reward audit changed")
+            audit = json.loads(args.source_replay_audit.read_text())
+            rewards = {row["target_game"]: row for row in audit["tasks"]}
+            if (audit["labels_sha256"] != dataset.get("predecessor_labels_sha256") or
+                    len(rewards) != len(sources) or
+                    any(task["target_game"] not in rewards or
+                        task["teacher_arm"] != (
+                            "source_replay" if rewards[task["target_game"]]
+                                ["own"]["won"] else "walkthrough") or
+                        task["wrong_replay_won"] != bool(
+                            rewards[task["target_game"]]["wrong"]["won"])
+                        for task in dataset["tasks"])):
+                raise ValueError("Source-replay selected train targets changed")
+        elif args.teacher_mode == "replay_or_walkthrough":
+            raise ValueError("Replay-selected training lacks reward audit")
     else:
         raise ValueError("Unknown reward-distillation source scope")
     if (not source_lineage_ok or
@@ -546,7 +568,11 @@ def train(args):
         anchor = sum((adapter.b - reference).float().square().mean()
                      for adapter, reference in zip(agent.adapters,
                          source_factors[game], strict=True))
-        if args.source_contrast_weight:
+        reward_contrast_eligible = (
+            dataset.get("source_replay_audit_sha256") is None or
+            (task.get("teacher_arm") == "source_replay" and
+             not task.get("wrong_replay_won", False)))
+        if args.source_contrast_weight and reward_contrast_eligible:
             agent.set_source(wrong_fields[game],
                              target_fields=current_target)
             wrong_ce = target_loss(agent, tokenizer, row,
@@ -580,6 +606,9 @@ def train(args):
             row["input_content_sha256"], 0.0)))
         weight = (1.0 + args.advantage_bonus * advantage) * (
             1.0 + args.text_teacher_weight * text_gain)
+        if (task.get("teacher_arm") == "source_replay" and
+                not task.get("wrong_replay_won", False)):
+            weight *= 1.0 + args.replay_advantage_bonus
         if discriminative_by_game:
             weight *= (1.0 + args.admissible_wrong_bonus *
                 float(discriminative_meta[row["input_content_sha256"]][
@@ -618,6 +647,16 @@ def train(args):
               "lr": args.lr, "weight_decay": args.weight_decay,
               "anchor_weight": args.anchor_weight,
               "advantage_bonus": args.advantage_bonus,
+              "replay_advantage_bonus": args.replay_advantage_bonus,
+              "reward_contrast_eligible_tasks": sum(
+                  task.get("teacher_arm") == "source_replay" and
+                  not task.get("wrong_replay_won", False)
+                  for task in dataset["tasks"])
+                  if dataset.get("source_replay_audit_sha256") is not None
+                  else None,
+              "source_replay_audit_sha256": (
+                  file_hash(args.source_replay_audit)
+                  if args.source_replay_audit is not None else None),
               "focus_probability": args.focus_probability,
               "source_contrast_weight": args.source_contrast_weight,
               "source_contrast_margin": args.source_contrast_margin,
@@ -716,6 +755,7 @@ def main():
     parser.add_argument("--all-source-review", type=Path)
     parser.add_argument("--sibling-candidates", type=Path)
     parser.add_argument("--sibling-source-review", type=Path)
+    parser.add_argument("--source-replay-audit", type=Path)
     parser.add_argument("--labels", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_retry_reward_labels_20261006.json"))
     parser.add_argument("--label-review", type=Path, default=Path(
@@ -723,13 +763,15 @@ def main():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--gpu-fraction", type=float, default=.65)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--teacher-mode", choices=("retry", "walkthrough"),
+    parser.add_argument("--teacher-mode", choices=("retry", "walkthrough",
+                                                  "replay_or_walkthrough"),
                         default="retry")
     parser.add_argument("--steps", type=int, default=400)
     parser.add_argument("--lr", type=float, default=.00003)
     parser.add_argument("--weight-decay", type=float, default=.01)
     parser.add_argument("--anchor-weight", type=float, default=.1)
     parser.add_argument("--advantage-bonus", type=float, default=2.)
+    parser.add_argument("--replay-advantage-bonus", type=float, default=0.)
     parser.add_argument("--focus-probability", type=float, default=.5,
                         help="Chance to train the earliest action changed between failed first attempt and winning retry")
     parser.add_argument("--source-contrast-weight", type=float, default=0.)
@@ -765,6 +807,9 @@ def main():
     args = parser.parse_args()
     if (args.steps < 1 or args.log_every < 1 or args.lr <= 0 or
             args.anchor_weight < 0 or args.advantage_bonus < 0 or
+            args.replay_advantage_bonus < 0 or
+            (args.replay_advantage_bonus and
+             args.teacher_mode != "replay_or_walkthrough") or
             args.source_contrast_weight < 0 or args.source_contrast_margin < 0 or
             args.match_contrast_weight < 0 or args.match_contrast_margin < 0 or
             (args.match_contrast_weight and not args.source_contrast_weight) or
@@ -783,6 +828,8 @@ def main():
              args.source_truncation != "head_tail") or
             not 0 < args.gpu_fraction <= 1):
         parser.error("Invalid reward-distillation budget")
+    if args.command != "train" and args.teacher_mode == "replay_or_walkthrough":
+        parser.error("Replay-selected labels use prepare_alf_replay_supervision")
     if args.command == "prepare":
         prepare(args)
     elif args.command == "review":
