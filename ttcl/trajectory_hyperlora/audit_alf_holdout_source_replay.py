@@ -69,6 +69,8 @@ def main():
         "ttcl/data/alfworld_delta"))
     parser.add_argument("--split", choices=("train_large",), default="train_large")
     parser.add_argument("--large-offset", type=int, default=100)
+    parser.add_argument("--family", type=str,
+                        help="Optional single train_large family in reviewed candidates")
     parser.add_argument("--expected-tasks", type=int, default=60)
     parser.add_argument("--output", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_sibling_holdout60_source_replay_20261006.json"))
