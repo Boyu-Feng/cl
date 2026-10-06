@@ -312,6 +312,55 @@ def train(args):
                 raise ValueError("Unreviewed or changed reward action")
     teacher_advantage = {}
     train_tasks = dataset["tasks"]
+    discriminative_by_game = {}
+    discriminative_meta = {}
+    if args.discriminative_candidates is not None or args.discriminative_review is not None:
+        if (source_scope != "sibling_expert" or
+                args.discriminative_candidates is None or
+                args.discriminative_review is None):
+            raise ValueError("Discriminative action selection needs both reviewed paths")
+        from ttcl.trajectory_hyperlora.select_alf_sibling_action_evidence import (
+            content as selection_content,
+        )
+        selected = json.loads(args.discriminative_candidates.read_text())
+        selected_review = json.loads(args.discriminative_review.read_text())
+        if (selected["labels_sha256"] != file_hash(args.labels) or
+                selected["label_review_sha256"] != file_hash(args.label_review) or
+                selected["source_review_sha256"] !=
+                    dataset["sibling_source_review_sha256"] or
+                selected_review["candidates_sha256"] !=
+                    file_hash(args.discriminative_candidates)):
+            raise ValueError("Discriminative action lineage changed")
+        selected_notes = {note["selection_content_sha256"]: note
+            for note in selected_review["annotations"]}
+        if len(selected_notes) != len(selected["rows"]):
+            raise ValueError("Discriminative annotations incomplete")
+        tasks_by_game = {task["target_game"]: task
+                         for task in dataset["tasks"]}
+        for item in selected["rows"]:
+            task = tasks_by_game.get(item["target_game"])
+            note = selected_notes.get(item["selection_content_sha256"])
+            if (task is None or note is None or note["approved"] is not True or
+                    digest(selection_content(item)) !=
+                        item["selection_content_sha256"] or
+                    note["action_input_sha256"] != item["action_input_sha256"] or
+                    item["target_game_sha256"] != task["target_game_sha256"] or
+                    item["source_records_sha256"] !=
+                        digest(task["labels"][0]["source_records"]) or
+                    item["wrong_records_sha256"] !=
+                        digest(task["wrong_records"]) or
+                    item["action_index"] >= len(task["labels"])):
+                raise ValueError("Discriminative selection content changed")
+            label = task["labels"][item["action_index"]]
+            if (label["input_content_sha256"] != item["action_input_sha256"] or
+                    label["target_action"] != item["expert_action"]):
+                raise ValueError("Discriminative target action changed")
+            discriminative_by_game.setdefault(item["target_game"], []).append(label)
+            discriminative_meta[item["action_input_sha256"]] = item
+        train_tasks = [task for task in dataset["tasks"]
+                       if task["target_game"] in discriminative_by_game]
+        if len(train_tasks) < 2 or len(discriminative_meta) != len(selected["rows"]):
+            raise ValueError("Too few unique discriminative training actions")
     if args.text_teacher_scores is not None:
         if source_scope != "sibling_expert":
             raise ValueError("Text-teacher scores require sibling expert sources")
@@ -433,7 +482,9 @@ def train(args):
     losses = []
     for step in range(args.steps):
         task = rng.choice(train_tasks)
-        row = (task["labels"][0] if args.only_text_positive else
+        row = (rng.choice(discriminative_by_game[task["target_game"]])
+               if discriminative_by_game else
+               task["labels"][0] if args.only_text_positive else
                task["labels"][task["first_changed_action"]]
                if rng.random() < args.focus_probability
                else rng.choice(task["labels"]))
@@ -478,6 +529,10 @@ def train(args):
             row["input_content_sha256"], 0.0)))
         weight = (1.0 + args.advantage_bonus * advantage) * (
             1.0 + args.text_teacher_weight * text_gain)
+        if discriminative_by_game:
+            weight *= (1.0 + args.admissible_wrong_bonus *
+                float(discriminative_meta[row["input_content_sha256"]][
+                    "wrong_action_admissible"]))
         loss = (weight * ce + args.anchor_weight * anchor +
                 args.source_contrast_weight * contrast +
                 args.match_contrast_weight * match_contrast)
@@ -523,6 +578,13 @@ def train(args):
               "text_advantage_min": args.text_advantage_min,
               "only_text_positive": args.only_text_positive,
               "selected_train_tasks": len(train_tasks),
+              "discriminative_candidates_sha256": (
+                  file_hash(args.discriminative_candidates)
+                  if args.discriminative_candidates is not None else None),
+              "discriminative_review_sha256": (
+                  file_hash(args.discriminative_review)
+                  if args.discriminative_review is not None else None),
+              "admissible_wrong_bonus": args.admissible_wrong_bonus,
               "history_turns": args.history_turns,
               "max_prompt_tokens": args.max_prompt_tokens,
               "source_max_tokens": args.source_max_tokens,
@@ -533,8 +595,9 @@ def train(args):
               "contextual_source_max_tokens": args.contextual_source_max_tokens,
               "train_tasks": len(dataset["tasks"]),
               "train_actions": len(examples),
-              "selected_training_action_candidates": (len(train_tasks)
-                  if args.only_text_positive else len(examples)),
+              "selected_training_action_candidates": (
+                  len(discriminative_meta) if discriminative_by_game else
+                  len(train_tasks) if args.only_text_positive else len(examples)),
               "last_losses": losses[-args.log_every:]}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.save_checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -562,6 +625,8 @@ def train(args):
                 "source_contrast_weight": args.source_contrast_weight,
                 "match_contrast_weight": args.match_contrast_weight,
                 "match_contrast_margin": args.match_contrast_margin,
+                "discriminative_candidates_sha256": result[
+                    "discriminative_candidates_sha256"],
                 "labels_sha256": result["labels_sha256"]},
                args.save_checkpoint)
     return result
@@ -612,6 +677,9 @@ def main():
     parser.add_argument("--source-contrast-margin", type=float, default=.2)
     parser.add_argument("--match-contrast-weight", type=float, default=0.)
     parser.add_argument("--match-contrast-margin", type=float, default=.1)
+    parser.add_argument("--discriminative-candidates", type=Path)
+    parser.add_argument("--discriminative-review", type=Path)
+    parser.add_argument("--admissible-wrong-bonus", type=float, default=0.)
     parser.add_argument("--text-teacher-scores", type=Path)
     parser.add_argument("--text-teacher-weight", type=float, default=0.)
     parser.add_argument("--text-advantage-min", type=float, default=.1)
@@ -635,6 +703,7 @@ def main():
             args.source_contrast_weight < 0 or args.source_contrast_margin < 0 or
             args.match_contrast_weight < 0 or args.match_contrast_margin < 0 or
             (args.match_contrast_weight and not args.source_contrast_weight) or
+            args.admissible_wrong_bonus < 0 or
             args.text_teacher_weight < 0 or
             (args.only_text_positive and args.text_teacher_scores is None) or
             not 0 <= args.focus_probability <= 1 or
