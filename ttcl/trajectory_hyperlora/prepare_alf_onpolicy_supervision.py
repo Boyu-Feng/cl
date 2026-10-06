@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 
 from ttcl.experience_evolution.environment import ACTOR_SYSTEM, make_env
+from ttcl.trajectory_hyperlora.alfworld_heldout_retry import replay_episode
+from ttcl.trajectory_hyperlora.alfworld_online_from_empty import records_from_episode
 from ttcl.trajectory_hyperlora.alfworld_same_game_retry import digest, file_hash
 from ttcl.trajectory_hyperlora.alfworld_sibling_transfer import checked_review
 from ttcl.trajectory_hyperlora.train_alf_sibling_labels import utility
@@ -61,6 +63,7 @@ def checked_rollouts(args):
 
 def build(args) -> dict:
     report, by_game = checked_rollouts(args)
+    source_mode = getattr(args, "source_mode", "sibling_expert")
     tasks = []
     for item in report["games"]:
         row, note = by_game[item["game"]]
@@ -71,6 +74,16 @@ def build(args) -> dict:
         game = args.data_root / item["game"]
         if file_hash(game) != row["target_game_sha256"]:
             raise ValueError("On-policy target game changed")
+        base = item["arms"]["base"]
+        if source_mode == "base_episode":
+            if base["reward"]:
+                continue
+            replay_episode(game, base)
+            source_records = records_from_episode(base)
+            source_episode_sha256 = digest(source_records)
+        else:
+            source_records = note["source_records"]
+            source_episode_sha256 = note["source_records_sha256"]
         env = make_env(game)
         try:
             state = env.reset()
@@ -89,8 +102,8 @@ def build(args) -> dict:
                     "\n".join(available)})
                 content = {"target_game": item["game"],
                     "target_game_sha256": row["target_game_sha256"],
-                    "source_episode_sha256": note["source_records_sha256"],
-                    "source_records": note["source_records"],
+                    "source_episode_sha256": source_episode_sha256,
+                    "source_records": source_records,
                     "teacher_arm": arm,
                     "target_messages": list(messages),
                     "target_action": command}
@@ -107,10 +120,9 @@ def build(args) -> dict:
         finally:
             env.close()
         own = item["arms"]["own"]
-        base = item["arms"]["base"]
         tasks.append({"target_game": item["game"],
             "target_game_sha256": row["target_game_sha256"],
-            "source_episode_sha256": note["source_records_sha256"],
+            "source_episode_sha256": source_episode_sha256,
             "teacher_arm": arm,
             "own_utility": utility(own["reward"], own["steps"]),
             "baseline_utility": utility(base["reward"], base["steps"]),
@@ -120,8 +132,13 @@ def build(args) -> dict:
             "labels": labels})
     if len(tasks) < args.minimum_winners:
         raise ValueError("Too few official on-policy wins for training")
-    return {"protocol": "Train-only official-won on-policy best-arm reward selection; every selected action replayed and freshly content-bound",
-        "source_scope": "sibling_expert", "split": "train_large",
+    return {"protocol": ("Train-only official-won on-policy best-arm reward selection; every selected action replayed and freshly content-bound"
+            if source_mode == "sibling_expert" else
+            "Train-only official-won retry reward selection from replayed failed no-LoRA trajectories; every selected action freshly content-bound"),
+        "source_scope": ("own_failed_retry" if source_mode ==
+                         "base_episode" else "sibling_expert"),
+        **({"source_mode": source_mode} if source_mode ==
+           "base_episode" else {}), "split": "train_large",
         "teacher_mode": "on_policy_best",
         "sibling_candidates_sha256": file_hash(args.candidates),
         "sibling_source_review_sha256": file_hash(args.source_review),
@@ -194,6 +211,8 @@ def main():
     parser.add_argument("--expected-games", type=int, default=240)
     parser.add_argument("--per-family-limit", type=int, default=40)
     parser.add_argument("--minimum-winners", type=int, default=20)
+    parser.add_argument("--source-mode", choices=("sibling_expert",
+                        "base_episode"), default="sibling_expert")
     parser.add_argument("--output", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_sibling_train240_onpolicy_best_labels_20261006.json"))
     parser.add_argument("--output-review", type=Path, default=Path(

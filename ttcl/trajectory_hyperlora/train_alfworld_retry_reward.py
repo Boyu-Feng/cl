@@ -245,7 +245,7 @@ def train(args):
             file_hash(args.source_review))
         wrong_by_game = {task["target_game"]: task["wrong_records"]
                          for task in dataset["tasks"]}
-    elif source_scope == "sibling_expert":
+    elif source_scope in ("sibling_expert", "own_failed_retry"):
         if args.sibling_candidates is None or args.sibling_source_review is None:
             raise ValueError("Sibling training needs reviewed source paths")
         from ttcl.trajectory_hyperlora.alfworld_sibling_transfer import checked_review
@@ -276,10 +276,14 @@ def train(args):
                 any(task["target_game"] not in source_by_game or
                     task["target_game_sha256"] !=
                         source_rows_by_game[task["target_game"]]["target_game_sha256"] or
-                    task["source_episode_sha256"] !=
-                        source_by_game[task["target_game"]]["source_records_sha256"] or
-                    task["labels"][0]["source_records"] !=
-                        source_by_game[task["target_game"]]["source_records"] or
+                    (source_scope == "sibling_expert" and (
+                        task["source_episode_sha256"] !=
+                            source_by_game[task["target_game"]]["source_records_sha256"] or
+                        task["labels"][0]["source_records"] !=
+                            source_by_game[task["target_game"]]["source_records"])) or
+                    (source_scope == "own_failed_retry" and
+                        task["source_episode_sha256"] !=
+                            digest(task["labels"][0]["source_records"])) or
                     task["wrong_records"] !=
                         source_by_game[task["target_game"]]["wrong_records"] or
                     task["teacher_utility"] != (1.0 - .25 *
@@ -292,9 +296,14 @@ def train(args):
             raise ValueError("Large sibling targets lack own-attempt reward; set --advantage-bonus 0")
         wrong_by_game = {task["target_game"]: task["wrong_records"]
                          for task in dataset["tasks"]}
+        if source_scope == "own_failed_retry" and not on_policy:
+            raise ValueError("Failed-own-source training needs frozen on-policy rollouts")
         if on_policy:
             if (args.teacher_mode != "on_policy_best" or
                     args.on_policy_rollouts is None or
+                    args.on_policy_source_mode != (
+                        "base_episode" if source_scope == "own_failed_retry"
+                        else "sibling_expert") or
                     dataset["on_policy_rollouts_sha256"] !=
                         file_hash(args.on_policy_rollouts) or
                     review.get("on_policy_rollouts_sha256") !=
@@ -305,7 +314,8 @@ def train(args):
             )
             on_policy_args = argparse.Namespace(
                 rollouts=args.on_policy_rollouts,
-                checkpoint=args.checkpoint,
+                checkpoint=(args.on_policy_rollout_checkpoint or
+                            args.checkpoint),
                 candidates=args.sibling_candidates,
                 source_review=args.sibling_source_review,
                 retry_candidates=args.candidates,
@@ -314,7 +324,8 @@ def train(args):
                 data_root=args.data_root,
                 expected_games=args.on_policy_expected_games,
                 per_family_limit=args.on_policy_per_family_limit,
-                minimum_winners=args.on_policy_minimum_winners)
+                minimum_winners=args.on_policy_minimum_winners,
+                source_mode=args.on_policy_source_mode)
             if dataset != build_on_policy(on_policy_args):
                 raise ValueError("On-policy winning actions changed")
         elif args.teacher_mode == "on_policy_best":
@@ -455,7 +466,7 @@ def train(args):
                                   args.device, args.gpu_fraction,
                                   context_mode_override=args.context_mode)
     if args.contextual_source:
-        if source_scope != "sibling_expert":
+        if source_scope not in ("sibling_expert", "own_failed_retry"):
             raise ValueError("Contextual source training requires sibling trajectories")
         if agent.encoder_kind == "covariance":
             old_latents = []
@@ -484,7 +495,7 @@ def train(args):
         raise ValueError("Contextual checkpoint requires --contextual-source")
     existing_task_conditioned = agent.task_conditioned
     if args.task_conditioned:
-        if source_scope != "sibling_expert" or not args.contextual_source:
+        if source_scope not in ("sibling_expert", "own_failed_retry") or not args.contextual_source:
             raise ValueError("Task conditioning needs reviewed sibling contextual sources")
         if agent.task_conditioned and agent.task_pair_pooling != args.task_pair_pooling:
             raise ValueError("Task-pair pooling changed across checkpoints")
@@ -674,7 +685,7 @@ def train(args):
               "source_lineage_sha256": (file_hash(args.retries)
                   if source_scope == "same_game_retry" else
                   file_hash(args.sibling_source_review)
-                  if source_scope == "sibling_expert" else
+                  if source_scope in ("sibling_expert", "own_failed_retry") else
                   file_hash(args.source_review)),
               "seed": args.seed, "steps": args.steps,
               "lr": args.lr, "weight_decay": args.weight_decay,
@@ -693,6 +704,9 @@ def train(args):
               "on_policy_rollouts_sha256": (
                   file_hash(args.on_policy_rollouts)
                   if args.on_policy_rollouts is not None else None),
+              "on_policy_rollout_checkpoint_sha256": (
+                  file_hash(args.on_policy_rollout_checkpoint)
+                  if args.on_policy_rollout_checkpoint is not None else None),
               "focus_probability": args.focus_probability,
               "source_contrast_weight": args.source_contrast_weight,
               "source_contrast_margin": args.source_contrast_margin,
@@ -793,9 +807,12 @@ def main():
     parser.add_argument("--sibling-source-review", type=Path)
     parser.add_argument("--source-replay-audit", type=Path)
     parser.add_argument("--on-policy-rollouts", type=Path)
+    parser.add_argument("--on-policy-rollout-checkpoint", type=Path)
     parser.add_argument("--on-policy-expected-games", type=int, default=240)
     parser.add_argument("--on-policy-per-family-limit", type=int, default=40)
     parser.add_argument("--on-policy-minimum-winners", type=int, default=20)
+    parser.add_argument("--on-policy-source-mode", choices=("sibling_expert",
+                        "base_episode"), default="sibling_expert")
     parser.add_argument("--labels", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_retry_reward_labels_20261006.json"))
     parser.add_argument("--label-review", type=Path, default=Path(
