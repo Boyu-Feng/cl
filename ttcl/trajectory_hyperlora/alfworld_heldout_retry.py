@@ -17,6 +17,7 @@ from ttcl.experience_evolution.environment import make_env
 from ttcl.trajectory_hyperlora.alfworld_online_from_empty import records_from_episode
 from ttcl.trajectory_hyperlora.alfworld_same_game_retry import digest, file_hash
 from ttcl.trajectory_hyperlora.alfworld_zero_shot_probe import load_agent, run_episode
+from ttcl.trajectory_hyperlora.contextual_alf_source import contextual_source_fields
 from ttcl.trajectory_hyperlora.relational_router_pilot import tokenize_records
 
 
@@ -129,17 +130,34 @@ def replay_episode(game: Path, episode: dict):
 def evaluate(args):
     if args.output.exists():
         raise FileExistsError(args.output)
-    targets = checked_targets(args)[args.offset:args.offset + args.limit]
+    targets = checked_targets(args)
+    if args.family:
+        targets = [row for row in targets if row["family"] == args.family]
+    targets = targets[args.offset:args.offset + args.limit]
     if not targets:
         raise ValueError("Empty held-out target block")
     agent, tokenizer = load_agent(args.model, args.checkpoint,
                                   args.device, args.gpu_fraction)
     for adapter in agent.adapters:
         adapter.scale = args.adapter_scale
+    def source_fields(records):
+        if agent.encoder_kind == "contextual":
+            return contextual_source_fields(agent, tokenizer, records,
+                args.device, args.contextual_source_max_tokens,
+                pooling="both" if agent.task_conditioned and
+                    agent.task_pair_pooling == "mean" else "last")
+        return tokenize_records(tokenizer, records, args.device,
+            max_tokens=args.source_max_tokens,
+            truncation_mode=args.source_truncation,
+            repeat_initial_observation=args.repeat_initial_observation)
     result = {"protocol": "Online official valid_unseen: no-history first attempt, then same-game retry with own trajectory LoRA, wrong train trajectory LoRA, or no LoRA; wrong is same-family where available; full first attempt replayed and source-content-bound; won reward",
               "review_sha256": file_hash(args.review),
               "checkpoint_sha256": file_hash(args.checkpoint),
               "offset": args.offset, "limit": args.limit,
+              "family": args.family,
+              "actor_history_turns": args.actor_history_turns,
+              "source_encoder": agent.encoder_kind,
+              "contextual_source_max_tokens": args.contextual_source_max_tokens,
               "source_max_tokens": args.source_max_tokens,
               "source_truncation": args.source_truncation,
               "repeat_initial_observation": args.repeat_initial_observation,
@@ -151,22 +169,18 @@ def evaluate(args):
             game = args.data_root / row["game"]
             base = run_episode(agent, tokenizer, game, {}, adapter=False,
                 device=args.device, max_steps=30, max_new_tokens=64,
-                constrain_actions=True)
+                constrain_actions=True,
+                actor_history_turns=args.actor_history_turns)
             replay_episode(game, base)
             own_records = records_from_episode(base)
-            own = tokenize_records(tokenizer, own_records, args.device,
-                max_tokens=args.source_max_tokens,
-                truncation_mode=args.source_truncation,
-                repeat_initial_observation=args.repeat_initial_observation)
-            wrong = tokenize_records(tokenizer, row["wrong_source_records"],
-                args.device, max_tokens=args.source_max_tokens,
-                truncation_mode=args.source_truncation,
-                repeat_initial_observation=args.repeat_initial_observation)
+            own = source_fields(own_records)
+            wrong = source_fields(row["wrong_source_records"])
             arms = {"base": base}
             for name, fields in (("own", own), ("wrong", wrong)):
                 arms[name] = run_episode(agent, tokenizer, game, fields,
                     adapter=True, device=args.device, max_steps=30,
-                    max_new_tokens=64, constrain_actions=True)
+                    max_new_tokens=64, constrain_actions=True,
+                    actor_history_turns=args.actor_history_turns)
                 if (arms[name]["status"] != "complete" or
                         arms[name]["initial_observation"] !=
                         base["initial_observation"]):
@@ -213,6 +227,10 @@ def main():
         "data/annotations/alf_heldout_retry_reviewed_20261006.json"))
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=6)
+    parser.add_argument("--family", type=str)
+    parser.add_argument("--actor-history-turns", type=int)
+    parser.add_argument("--contextual-source-max-tokens", type=int,
+                        default=2048)
     parser.add_argument("--source-max-tokens", type=int, default=40)
     parser.add_argument("--source-truncation", choices=("head", "head_tail"),
                         default="head_tail")
@@ -223,6 +241,9 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if (args.offset < 0 or args.limit < 1 or args.source_max_tokens < 2 or
+            args.contextual_source_max_tokens < 2 or
+            (args.actor_history_turns is not None and
+             args.actor_history_turns < 1) or
             (args.repeat_initial_observation and
              args.source_truncation != "head_tail") or
             not 0 < args.adapter_scale <= 1 or
