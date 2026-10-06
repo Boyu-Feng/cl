@@ -21,7 +21,7 @@ from ttcl.trajectory_hyperlora.contextual_alf_source import (
 from ttcl.trajectory_hyperlora.train_alfworld_retry_reward import label_content
 
 
-def checked_tasks(args):
+def checked_tasks(args, expected_tasks: int = 120):
     dataset = json.loads(args.labels.read_text())
     review = json.loads(args.label_review.read_text())
     if (dataset["source_scope"] != "sibling_expert" or
@@ -29,7 +29,8 @@ def checked_tasks(args):
             dataset["sibling_source_review_sha256"] !=
                 file_hash(args.source_review) or
             review["labels_sha256"] != file_hash(args.labels) or
-            len(dataset["tasks"]) != 120):
+            len(dataset["tasks"]) != expected_tasks or
+            expected_tasks < 12 or expected_tasks % 6):
         raise ValueError("Gate calibration requires reviewed large train tasks")
     approved = {row["input_content_sha256"]: row
                 for row in review["annotations"]}

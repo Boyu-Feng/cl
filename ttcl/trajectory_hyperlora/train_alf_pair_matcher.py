@@ -20,6 +20,7 @@ from ttcl.experience_evolution.environment import make_env
 from ttcl.trajectory_hyperlora.alfworld_same_game_retry import digest, file_hash
 from ttcl.trajectory_hyperlora.alfworld_zero_shot_probe import load_agent
 from ttcl.trajectory_hyperlora.calibrate_alf_sibling_gate import checked_tasks
+from ttcl.trajectory_hyperlora.alfworld_sibling_transfer import checked_review
 from ttcl.trajectory_hyperlora.contextual_alf_source import (
     contextual_source_fields, contextual_text_fields,
 )
@@ -70,22 +71,47 @@ def threshold(scores, labels):
 def run(args):
     if args.output.exists() or args.save_checkpoint.exists():
         raise FileExistsError("Fresh matcher outputs required")
-    tasks = checked_tasks(args)
+    if args.source_only:
+        reviewed = checked_review(argparse.Namespace(
+            candidates=args.train_candidates, source_review=args.source_review,
+            retry_candidates=args.retry_candidates, review=args.retry_review,
+            all_source_review=args.all_source_review,
+            data_root=args.data_root, split="train_large"))
+        if len(reviewed) != args.expected_tasks:
+            raise ValueError("Source-only matcher train budget changed")
+        tasks = []
+        for row, note in reviewed:
+            env = make_env(args.data_root / row["target_game"])
+            try:
+                observation = str(env.reset()["feedback"])
+            finally:
+                env.close()
+            tasks.append({"target_game": row["target_game"],
+                "observation": observation,
+                "source_records": note["source_records"],
+                "wrong_records": note["wrong_records"]})
+    else:
+        checked = checked_tasks(args, expected_tasks=args.expected_tasks)
+        tasks = []
+        for task in checked:
+            label = task["labels"][0]
+            tasks.append({"target_game": task["target_game"],
+                "observation": label["target_messages"][1]["content"].split(
+                    "\nAvailable commands:\n", 1)[0],
+                "source_records": label["source_records"],
+                "wrong_records": task["wrong_records"]})
     agent, tokenizer = load_agent(args.model, args.checkpoint,
                                   args.device, args.gpu_fraction)
     if agent.encoder_kind != "contextual":
         raise ValueError("Matcher expects a contextual source checkpoint")
     train_features = []
     for task in tasks:
-        label = task["labels"][0]
-        observation = label["target_messages"][1]["content"].split(
-            "\nAvailable commands:\n", 1)[0]
         target = contextual_text_fields(agent, tokenizer,
-            "Current task observation:\n" + observation,
+            "Current task observation:\n" + task["observation"],
             args.device, args.max_source_tokens,
             pooling=args.pooling)["contextual"]
         own = contextual_source_fields(agent, tokenizer,
-            label["source_records"], args.device,
+            task["source_records"], args.device,
             args.max_source_tokens, pooling=args.pooling)["contextual"]
         wrong = contextual_source_fields(agent, tokenizer,
             task["wrong_records"], args.device,
@@ -113,8 +139,8 @@ def run(args):
         dev_features.append((pair_feature(own, target),
                              pair_feature(wrong, target)))
 
-    # Four of each task family are held out from fitting. This split is fixed
-    # by source game content; the development tasks are never consulted here.
+    # One fifth of each task family is held out from fitting. This split is
+    # fixed by game content; development tasks are never consulted here.
     by_family = {}
     for index, task in enumerate(tasks):
         family = task["target_game"].split("/")[2].split("-", 1)[0]
@@ -123,10 +149,11 @@ def run(args):
     for family, indices in sorted(by_family.items()):
         ordered = sorted(indices, key=lambda index: digest([
             "pair_matcher_split", tasks[index]["target_game"]]))
-        if len(ordered) != 20:
+        if len(ordered) != args.expected_tasks // 6:
             raise ValueError(f"Matcher family is incomplete: {family}")
-        fit.extend(ordered[:16])
-        holdout.extend(ordered[16:])
+        fit_count = 4 * len(ordered) // 5
+        fit.extend(ordered[:fit_count])
+        holdout.extend(ordered[fit_count:])
     fit_rows = torch.stack([feature for index in fit
         for feature in train_features[index]])
     feature_mean = fit_rows.mean(0)
@@ -175,14 +202,19 @@ def run(args):
             "own_mounted": sum(scores[2*i] >= cut for i in range(count)),
             "wrong_rejected": sum(scores[2*i+1] < cut for i in range(count))}
 
-    result = {"protocol": "Frozen-Qwen raw contextual pair features, regularized train-only linear matcher; 16/4 task directories per family for fit/internal holdout, threshold fit-only; development source pairs scored after model selection; no development rewards or walkthroughs",
+    result = {"protocol": "Frozen-Qwen raw contextual pair features, regularized train-only linear matcher; 80/20 task directories per family for fit/internal holdout, threshold fit-only; development source pairs scored after model selection; no development rewards or walkthroughs",
         "source_checkpoint_sha256": file_hash(args.checkpoint),
-        "labels_sha256": file_hash(args.labels),
-        "label_review_sha256": file_hash(args.label_review),
+        "source_only": args.source_only,
+        "train_candidates_sha256": (file_hash(args.train_candidates)
+            if args.source_only else None),
+        "labels_sha256": (None if args.source_only else file_hash(args.labels)),
+        "label_review_sha256": (None if args.source_only else
+                                file_hash(args.label_review)),
         "source_review_sha256": file_hash(args.source_review),
         "dev_candidates_sha256": file_hash(args.dev_candidates),
         "dev_source_review_sha256": file_hash(args.dev_source_review),
         "max_source_tokens": args.max_source_tokens,
+        "expected_tasks": args.expected_tasks,
         "pooling": args.pooling,
         "seed": args.seed, "steps": args.steps,
         "best_step": best[1], "threshold": cut,
@@ -223,6 +255,15 @@ def main():
         "data/annotations/alf_sibling_train120_labels_reviewed_20261006.json"))
     parser.add_argument("--source-review", type=Path, default=Path(
         "data/annotations/alf_sibling_train120_reviewed_20261006.json"))
+    parser.add_argument("--source-only", action="store_true")
+    parser.add_argument("--train-candidates", type=Path, default=Path(
+        "results/trajectory_hyperlora/alf_sibling_train120_candidates_20261006.json"))
+    parser.add_argument("--retry-candidates", type=Path, default=Path(
+        "results/trajectory_hyperlora/alf_same_game_retry_candidates_20261006.json"))
+    parser.add_argument("--retry-review", type=Path, default=Path(
+        "data/annotations/alf_same_game_retry_reviewed_20261006.json"))
+    parser.add_argument("--all-source-review", type=Path, default=Path(
+        "data/annotations/alf_expert_first_attempts_reviewed_20261006.json"))
     parser.add_argument("--dev-candidates", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_sibling_dev_candidates_20261006.json"))
     parser.add_argument("--dev-source-review", type=Path, default=Path(
@@ -232,6 +273,7 @@ def main():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--gpu-fraction", type=float, default=.6)
     parser.add_argument("--max-source-tokens", type=int, default=2048)
+    parser.add_argument("--expected-tasks", type=int, default=120)
     parser.add_argument("--pooling", choices=("last", "mean"), default="last")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=500)
@@ -243,6 +285,7 @@ def main():
     args = parser.parse_args()
     if (args.steps < 20 or args.steps % 20 or args.lr <= 0 or
             args.l2 < 0 or args.weight_decay < 0 or
+            args.expected_tasks < 12 or args.expected_tasks % 6 or
             args.max_source_tokens < 2 or not 0 < args.gpu_fraction <= 1):
         parser.error("Invalid matcher training budget")
     run(args)
