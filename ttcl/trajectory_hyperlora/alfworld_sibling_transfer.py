@@ -246,12 +246,17 @@ def evaluate(args):
         rows = rows[:args.limit]
     agent, tokenizer = load_agent(args.model, args.checkpoint,
                                   args.device, args.gpu_fraction)
-    result = {"protocol": f"Cross-game ALFWorld {args.split} transfer; task-sibling expert source versus another same-family expert source versus no LoRA; target rollout has no expert leakage; 30 steps, 64 tokens, official won",
+    result = {"protocol": f"Cross-game ALFWorld {args.split} transfer; task-sibling expert source versus another same-family expert source versus no LoRA; target rollout has no expert leakage; 30 steps, 64 tokens, official won; actor source text {'included with LoRA' if args.memory_text else 'absent'}",
         "candidates_sha256": file_hash(args.candidates),
         "source_review_sha256": file_hash(args.source_review),
         "checkpoint_sha256": file_hash(args.checkpoint),
+        "runner_sha256": file_hash(Path(__file__)),
+        "actor_runner_sha256": file_hash(Path(run_episode.__code__.co_filename)),
+        "contextual_encoder_sha256": file_hash(Path(
+            contextual_source_fields.__code__.co_filename)),
         "source_truncation": args.source_truncation,
         "source_max_tokens": args.source_max_tokens,
+        "memory_text": args.memory_text,
         "per_family_limit": args.per_family_limit,
         "games": [], "failures": []}
     for row, note in rows:
@@ -262,7 +267,9 @@ def evaluate(args):
                 ("wrong", note["wrong_records"])):
                 fields = (
                     contextual_source_fields(agent, tokenizer, records,
-                        args.device, args.contextual_source_max_tokens)
+                        args.device, args.contextual_source_max_tokens,
+                        pooling="both" if agent.task_conditioned and
+                            agent.task_pair_pooling == "mean" else "last")
                     if agent.encoder_kind == "contextual" else
                     tokenize_records(tokenizer, records, args.device,
                         max_tokens=args.source_max_tokens,
@@ -272,7 +279,10 @@ def evaluate(args):
                     args.data_root / row["target_game"], fields,
                     adapter=records is not None, device=args.device,
                     max_steps=30, max_new_tokens=64,
-                    constrain_actions=True)
+                    constrain_actions=True,
+                    memory_text=(sibling_memory_text(records)
+                                 if args.memory_text and records is not None
+                                 else None))
                 if arms[arm]["status"] != "complete":
                     raise ValueError("Sibling target rollout failed")
             if len({arm["initial_observation"] for arm in arms.values()}) != 1:
@@ -557,6 +567,8 @@ def main():
                         default=2048)
     parser.add_argument("--source-truncation", choices=("head", "head_tail"),
                         default="head_tail")
+    parser.add_argument("--memory-text", action="store_true",
+                        help="Also show the same completed source as actor text")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--gpu-fraction", type=float, default=.6)
     parser.add_argument("--output", type=Path)

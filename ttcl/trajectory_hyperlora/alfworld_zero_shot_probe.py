@@ -64,7 +64,13 @@ def load_agent(model_path: Path, checkpoint_path: Path, device: str,
                                     context_mode=(context_mode_override or
                                         checkpoint.get("context_mode", "none")),
                                     context_strength=checkpoint.get(
-                                        "context_strength")).to(device)
+                                        "context_strength"),
+                                    task_conditioned=checkpoint.get(
+                                        "task_conditioned", False)).to(device)
+    agent.contextual_source_max_tokens = checkpoint.get(
+        "contextual_source_max_tokens", 2048)
+    agent.task_pair_pooling = checkpoint.get("task_pair_pooling", "last")
+    agent.task_context_scope = checkpoint.get("task_context_scope", "initial")
     agent.model.generation_config.temperature = 1.0
     agent.model.generation_config.top_p = 1.0
     agent.model.generation_config.top_k = 50
@@ -132,27 +138,55 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 memory_text: str | None = None) -> dict:
     if adapter and fixed_adapter is not None:
         raise ValueError("Choose trajectory adapter or fixed adapter")
-    with torch.no_grad():
-        agent.set_source(fields if adapter else None)
-        if fixed_adapter is not None:
-            if len(fixed_adapter) != len(agent.adapters):
-                raise ValueError("Fixed adapter layer count mismatch")
-            for layer, value in zip(agent.adapters, fixed_adapter, strict=True):
-                expected = (1, layer.base.out_features, layer.rank)
-                if tuple(value.shape) != expected:
-                    raise ValueError("Fixed adapter factor shape mismatch")
-                layer.b = value.to(device)
     env = make_env(game)
     trajectory = []
     try:
         state = env.reset()
         initial_observation = str(state["feedback"])
         initial_commands = list(state["admissible_commands"])
+        with torch.no_grad():
+            target_fields = None
+            if (adapter and agent.task_conditioned and
+                    agent.task_context_scope == "initial"):
+                from ttcl.trajectory_hyperlora.contextual_alf_source import (
+                    contextual_text_fields, task_context_text,
+                )
+                target_fields = contextual_text_fields(agent, tokenizer,
+                    task_context_text(initial_observation,
+                                      initial_observation),
+                    device, agent.contextual_source_max_tokens,
+                    pooling="both" if agent.task_pair_pooling == "mean"
+                        else "last")
+            if agent.task_context_scope == "initial" or not adapter:
+                agent.set_source(fields if adapter else None,
+                                 target_fields=target_fields)
+            if fixed_adapter is not None:
+                if len(fixed_adapter) != len(agent.adapters):
+                    raise ValueError("Fixed adapter layer count mismatch")
+                for layer, value in zip(agent.adapters, fixed_adapter,
+                                        strict=True):
+                    expected = (1, layer.base.out_features, layer.rank)
+                    if tuple(value.shape) != expected:
+                        raise ValueError("Fixed adapter factor shape mismatch")
+                    layer.b = value.to(device)
         system = ACTOR_SYSTEM
         if memory_text:
             system += "\n\nPrior attempt record:\n" + memory_text
         messages = [{"role": "system", "content": system}]
         for turn in range(max_steps):
+            if (adapter and agent.task_conditioned and
+                    agent.task_context_scope == "current"):
+                from ttcl.trajectory_hyperlora.contextual_alf_source import (
+                    contextual_text_fields, task_context_text,
+                )
+                current_target = contextual_text_fields(agent, tokenizer,
+                    task_context_text(initial_observation,
+                                      str(state["feedback"])),
+                    device, agent.contextual_source_max_tokens,
+                    pooling="both" if agent.task_pair_pooling == "mean"
+                        else "last")
+                with torch.no_grad():
+                    agent.set_source(fields, target_fields=current_target)
             available = list(state["admissible_commands"])
             messages.append({"role": "user", "content": str(state["feedback"]) +
                              "\nAvailable commands:\n" + "\n".join(available)})

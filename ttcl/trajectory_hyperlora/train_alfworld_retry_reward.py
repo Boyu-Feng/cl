@@ -24,7 +24,7 @@ from ttcl.trajectory_hyperlora.alfworld_same_game_retry import (
 )
 from ttcl.trajectory_hyperlora.alfworld_zero_shot_probe import load_agent
 from ttcl.trajectory_hyperlora.contextual_alf_source import (
-    contextual_source_fields, contextual_text_fields,
+    contextual_source_fields, contextual_text_fields, task_context_text,
 )
 from ttcl.trajectory_hyperlora.relational_router_pilot import tokenize_records
 from ttcl.trajectory_hyperlora.train_alf_next_task import query_ids, target_loss
@@ -430,16 +430,46 @@ def train(args):
             raise ValueError("Contextual source warm-start needs a compatible checkpoint")
     elif agent.encoder_kind == "contextual":
         raise ValueError("Contextual checkpoint requires --contextual-source")
+    existing_task_conditioned = agent.task_conditioned
+    if args.task_conditioned:
+        if source_scope != "sibling_expert" or not args.contextual_source:
+            raise ValueError("Task conditioning needs reviewed sibling contextual sources")
+        if agent.task_conditioned and agent.task_pair_pooling != args.task_pair_pooling:
+            raise ValueError("Task-pair pooling changed across checkpoints")
+        if not agent.task_conditioned:
+            width = agent.model.get_input_embeddings().embedding_dim
+            agent.task_pair_latent = nn.Sequential(
+                nn.LayerNorm(2 * width), nn.Linear(2 * width, 128)).to(args.device)
+            nn.init.zeros_(agent.task_pair_latent[1].weight)
+            nn.init.zeros_(agent.task_pair_latent[1].bias)
+            agent.task_conditioned = True
+        agent.task_pair_pooling = args.task_pair_pooling
+    elif agent.task_conditioned:
+        raise ValueError("Task-conditioned checkpoint requires --task-conditioned")
+    if (args.task_conditioned and existing_task_conditioned and
+            agent.task_context_scope != args.task_context_scope):
+        raise ValueError("Task-context scope changed across checkpoints")
+    agent.task_context_scope = args.task_context_scope
+    checkpoint_parameter_names = {name for name, parameter in
+        agent.named_parameters() if parameter.requires_grad}
+    if args.train_task_pair_only:
+        if not args.task_conditioned:
+            raise ValueError("Pair-only training needs task conditioning")
+        for name, parameter in agent.named_parameters():
+            parameter.requires_grad_(name.startswith("task_pair_latent."))
     source_fields = {}
     wrong_fields = {}
     target_fields = {}
+    step_target_fields = {}
     prefixes = {}
     for task in dataset["tasks"]:
         row = task["labels"][0]
         source_fields[task["target_game"]] = (
             contextual_source_fields(agent, tokenizer,
                 row["source_records"], args.device,
-                args.contextual_source_max_tokens)
+                args.contextual_source_max_tokens,
+                pooling="both" if args.task_conditioned and
+                    args.task_pair_pooling == "mean" else "last")
             if args.contextual_source else tokenize_records(
                 tokenizer, row["source_records"], args.device,
                 max_tokens=args.source_max_tokens,
@@ -449,22 +479,38 @@ def train(args):
             wrong_fields[task["target_game"]] = (
                 contextual_source_fields(agent, tokenizer,
                     wrong_by_game[task["target_game"]], args.device,
-                    args.contextual_source_max_tokens)
+                    args.contextual_source_max_tokens,
+                    pooling="both" if args.task_conditioned and
+                        args.task_pair_pooling == "mean" else "last")
                 if args.contextual_source else tokenize_records(
                     tokenizer, wrong_by_game[task["target_game"]], args.device,
                     max_tokens=args.source_max_tokens,
                     truncation_mode=args.source_truncation,
                     repeat_initial_observation=args.repeat_initial_observation))
-        if args.match_contrast_weight:
+        if args.match_contrast_weight or args.task_conditioned:
             if not args.contextual_source:
                 raise ValueError("Task matching needs contextual source vectors")
             first_observation = row["target_messages"][1]["content"].split(
                 "\nAvailable commands:\n", 1)[0]
             target_fields[task["target_game"]] = contextual_text_fields(
                 agent, tokenizer,
-                "Current task observation:\n" + first_observation,
-                args.device, args.contextual_source_max_tokens)
+                task_context_text(first_observation, first_observation),
+                args.device, args.contextual_source_max_tokens,
+                pooling="both" if args.task_conditioned and
+                    args.task_pair_pooling == "mean" else "last")
         for label in task["labels"]:
+            if args.task_conditioned and args.task_context_scope == "current":
+                current_observation = label["target_messages"][-1][
+                    "content"].split("\nAvailable commands:\n", 1)[0]
+                step_target_fields[label["input_content_sha256"]] = (
+                    target_fields[task["target_game"]]
+                    if current_observation == first_observation else
+                    contextual_text_fields(agent, tokenizer,
+                        task_context_text(first_observation,
+                                          current_observation),
+                        args.device, args.contextual_source_max_tokens,
+                        pooling="both" if args.task_pair_pooling == "mean"
+                            else "last"))
             prefixes[label["input_content_sha256"]] = query_ids(
                 tokenizer, label, history_turns=args.history_turns,
                 max_prompt_tokens=args.max_prompt_tokens)
@@ -472,7 +518,8 @@ def train(args):
     with torch.no_grad():
         for task in dataset["tasks"]:
             game = task["target_game"]
-            agent.set_source(source_fields[game])
+            agent.set_source(source_fields[game],
+                target_fields=target_fields.get(game))
             source_factors[game] = [adapter.b.detach().clone()
                 for adapter in agent.adapters]
             agent.set_source(None)
@@ -489,15 +536,19 @@ def train(args):
                if rng.random() < args.focus_probability
                else rng.choice(task["labels"]))
         game = task["target_game"]
+        current_target = step_target_fields.get(
+            row["input_content_sha256"], target_fields.get(game))
         optimizer.zero_grad(set_to_none=True)
-        agent.set_source(source_fields[game])
+        agent.set_source(source_fields[game],
+                         target_fields=current_target)
         ce = target_loss(agent, tokenizer, row,
             prefixes[row["input_content_sha256"]], args.device)
         anchor = sum((adapter.b - reference).float().square().mean()
                      for adapter, reference in zip(agent.adapters,
                          source_factors[game], strict=True))
         if args.source_contrast_weight:
-            agent.set_source(wrong_fields[game])
+            agent.set_source(wrong_fields[game],
+                             target_fields=current_target)
             wrong_ce = target_loss(agent, tokenizer, row,
                 prefixes[row["input_content_sha256"]], args.device)
             contrast = torch.relu(args.source_contrast_margin + ce - wrong_ce)
@@ -593,6 +644,10 @@ def train(args):
               "context_mode": args.context_mode,
               "contextual_source": args.contextual_source,
               "contextual_source_max_tokens": args.contextual_source_max_tokens,
+              "task_conditioned": args.task_conditioned,
+              "train_task_pair_only": args.train_task_pair_only,
+              "task_pair_pooling": args.task_pair_pooling,
+              "task_context_scope": args.task_context_scope,
               "train_tasks": len(dataset["tasks"]),
               "train_actions": len(examples),
               "selected_training_action_candidates": (
@@ -605,7 +660,7 @@ def train(args):
                                        indent=2) + "\n")
     torch.save({"trainable_state": {name: param.detach().cpu()
                                     for name, param in agent.named_parameters()
-                                    if param.requires_grad},
+                                    if name in checkpoint_parameter_names},
                 "rank": len(agent.adapters[0].a),
                 "layers": len(agent.adapters),
                 "encoder_kind": agent.encoder_kind,
@@ -621,6 +676,10 @@ def train(args):
                 "context_mode": args.context_mode,
                 "contextual_source": args.contextual_source,
                 "contextual_source_max_tokens": args.contextual_source_max_tokens,
+                "task_conditioned": args.task_conditioned,
+                "train_task_pair_only": args.train_task_pair_only,
+                "task_pair_pooling": args.task_pair_pooling,
+                "task_context_scope": args.task_context_scope,
                 "context_strength": agent.context_strength,
                 "source_contrast_weight": args.source_contrast_weight,
                 "match_contrast_weight": args.match_contrast_weight,
@@ -677,6 +736,12 @@ def main():
     parser.add_argument("--source-contrast-margin", type=float, default=.2)
     parser.add_argument("--match-contrast-weight", type=float, default=0.)
     parser.add_argument("--match-contrast-margin", type=float, default=.1)
+    parser.add_argument("--task-conditioned", action="store_true")
+    parser.add_argument("--train-task-pair-only", action="store_true")
+    parser.add_argument("--task-pair-pooling", choices=("last", "mean"),
+                        default="last")
+    parser.add_argument("--task-context-scope", choices=("initial", "current"),
+                        default="initial")
     parser.add_argument("--discriminative-candidates", type=Path)
     parser.add_argument("--discriminative-review", type=Path)
     parser.add_argument("--admissible-wrong-bonus", type=float, default=0.)
@@ -704,6 +769,10 @@ def main():
             args.match_contrast_weight < 0 or args.match_contrast_margin < 0 or
             (args.match_contrast_weight and not args.source_contrast_weight) or
             args.admissible_wrong_bonus < 0 or
+            (args.task_context_scope == "current" and
+             not args.task_conditioned) or
+            (args.task_pair_pooling == "mean" and
+             not args.task_conditioned) or
             args.text_teacher_weight < 0 or
             (args.only_text_positive and args.text_teacher_scores is None) or
             not 0 <= args.focus_probability <= 1 or

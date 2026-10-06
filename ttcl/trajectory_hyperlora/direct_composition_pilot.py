@@ -123,7 +123,8 @@ class DirectRelationHyperLoRA(nn.Module):
                  encoder_kind: str = "covariance",
                  relation_bottleneck: str = "none",
                  context_mode: str = "none",
-                 context_strength: float | None = None) -> None:
+                 context_strength: float | None = None,
+                 task_conditioned: bool = False) -> None:
         super().__init__()
         if encoder_kind not in ("covariance", "slots", "token_slots",
                                 "factorized", "contextual"):
@@ -140,6 +141,9 @@ class DirectRelationHyperLoRA(nn.Module):
         self.context_strength = (float(context_strength)
             if context_strength is not None else
             1.0 if context_mode == "initial" else 0.0)
+        if task_conditioned and encoder_kind != "contextual":
+            raise ValueError("Task-conditioned LoRA requires contextual vectors")
+        self.task_conditioned = task_conditioned
         self.model = model
         for parameter in model.parameters():
             parameter.requires_grad_(False)
@@ -153,6 +157,13 @@ class DirectRelationHyperLoRA(nn.Module):
             self.contextual_latent = nn.Sequential(
                 nn.LayerNorm(model.get_input_embeddings().embedding_dim),
                 nn.Linear(model.get_input_embeddings().embedding_dim, 128))
+            if task_conditioned:
+                width = model.get_input_embeddings().embedding_dim
+                self.task_pair_latent = nn.Sequential(
+                    nn.LayerNorm(2 * width),
+                    nn.Linear(2 * width, 128))
+                nn.init.zeros_(self.task_pair_latent[1].weight)
+                nn.init.zeros_(self.task_pair_latent[1].bias)
         else:
             self.slot_queries = nn.Parameter(torch.randn(len(CUES), width))
             self.slot_latent = nn.Sequential(nn.LayerNorm(len(CUES) * width),
@@ -217,7 +228,8 @@ class DirectRelationHyperLoRA(nn.Module):
         return self.latent(torch.cat((covariance, action_mean), dim=-1))
 
     def set_source(self, fields: dict | None,
-                   oracle_bits: torch.Tensor | None = None) -> None:
+                   oracle_bits: torch.Tensor | None = None,
+                   target_fields: dict | None = None) -> None:
         if fields is None and oracle_bits is None:
             for adapter in self.adapters:
                 adapter.b = None
@@ -233,6 +245,18 @@ class DirectRelationHyperLoRA(nn.Module):
             else:
                 bits = 2.0 * torch.sigmoid(logits) - 1.0
             latent = self.oracle_latent(bits)
+        if self.task_conditioned:
+            if fields is None or target_fields is None:
+                raise ValueError("Task-conditioned LoRA needs source and target")
+            source_vector = fields.get("pair_contextual", fields["contextual"])
+            target_vector = target_fields.get("pair_contextual",
+                                              target_fields["contextual"])
+            source = F.layer_norm(source_vector.float(),
+                                  (source_vector.shape[-1],))
+            target = F.layer_norm(target_vector.float(),
+                                  (target_vector.shape[-1],))
+            pair = torch.cat((source * target, (source - target).abs()), dim=-1)
+            latent = latent + self.task_pair_latent(pair)
         for adapter, head in zip(self.adapters, self.b_heads, strict=True):
             adapter.b = head(latent).reshape(1, adapter.base.out_features,
                                              adapter.rank)

@@ -5,7 +5,9 @@ import unittest
 import torch
 from torch import nn
 
-from ttcl.trajectory_hyperlora.contextual_alf_source import source_text
+from ttcl.trajectory_hyperlora.contextual_alf_source import (
+    source_text, task_context_text,
+)
 from ttcl.trajectory_hyperlora.direct_composition_pilot import DirectRelationHyperLoRA
 
 
@@ -25,6 +27,13 @@ class TinyActor(nn.Module):
 
 
 class ContextualSourceTest(unittest.TestCase):
+    def test_task_context_keeps_initial_goal_and_latest_feedback(self):
+        self.assertEqual(task_context_text("find cup", "find cup"),
+                         "Current task observation:\nfind cup")
+        self.assertEqual(task_context_text("find cup", "drawer is empty"),
+                         "Current task observation:\nfind cup\nLatest feedback:\n"
+                         "drawer is empty")
+
     def test_full_public_trajectory_is_encoded_without_rule_summary(self):
         records = [{"observation": "room; goal: put a cup on shelf",
                     "action": "go to desk 1", "feedback": "cup visible"}]

@@ -82,13 +82,14 @@ def run(args):
             "\nAvailable commands:\n", 1)[0]
         target = contextual_text_fields(agent, tokenizer,
             "Current task observation:\n" + observation,
-            args.device, args.max_source_tokens)["contextual"]
+            args.device, args.max_source_tokens,
+            pooling=args.pooling)["contextual"]
         own = contextual_source_fields(agent, tokenizer,
             label["source_records"], args.device,
-            args.max_source_tokens)["contextual"]
+            args.max_source_tokens, pooling=args.pooling)["contextual"]
         wrong = contextual_source_fields(agent, tokenizer,
             task["wrong_records"], args.device,
-            args.max_source_tokens)["contextual"]
+            args.max_source_tokens, pooling=args.pooling)["contextual"]
         train_features.append((pair_feature(own, target),
                                pair_feature(wrong, target)))
     development = dev_pairs(args)
@@ -101,13 +102,14 @@ def run(args):
             env.close()
         target = contextual_text_fields(agent, tokenizer,
             "Current task observation:\n" + observation,
-            args.device, args.max_source_tokens)["contextual"]
+            args.device, args.max_source_tokens,
+            pooling=args.pooling)["contextual"]
         own = contextual_source_fields(agent, tokenizer,
             note["source_records"], args.device,
-            args.max_source_tokens)["contextual"]
+            args.max_source_tokens, pooling=args.pooling)["contextual"]
         wrong = contextual_source_fields(agent, tokenizer,
             note["wrong_records"], args.device,
-            args.max_source_tokens)["contextual"]
+            args.max_source_tokens, pooling=args.pooling)["contextual"]
         dev_features.append((pair_feature(own, target),
                              pair_feature(wrong, target)))
 
@@ -181,6 +183,7 @@ def run(args):
         "dev_candidates_sha256": file_hash(args.dev_candidates),
         "dev_source_review_sha256": file_hash(args.dev_source_review),
         "max_source_tokens": args.max_source_tokens,
+        "pooling": args.pooling,
         "seed": args.seed, "steps": args.steps,
         "best_step": best[1], "threshold": cut,
         "fit": summary(fit_scores, len(fit)),
@@ -229,6 +232,7 @@ def main():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--gpu-fraction", type=float, default=.6)
     parser.add_argument("--max-source-tokens", type=int, default=2048)
+    parser.add_argument("--pooling", choices=("last", "mean"), default="last")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=500)
     parser.add_argument("--lr", type=float, default=.01)
