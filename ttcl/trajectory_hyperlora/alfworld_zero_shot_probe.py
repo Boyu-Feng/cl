@@ -135,9 +135,12 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 max_new_tokens: int,
                 constrain_actions: bool = False,
                 fixed_adapter: list[torch.Tensor] | None = None,
-                memory_text: str | None = None) -> dict:
+                memory_text: str | None = None,
+                actor_history_turns: int | None = None) -> dict:
     if adapter and fixed_adapter is not None:
         raise ValueError("Choose trajectory adapter or fixed adapter")
+    if actor_history_turns is not None and actor_history_turns < 1:
+        raise ValueError("Actor history window must be positive")
     env = make_env(game)
     trajectory = []
     try:
@@ -190,7 +193,13 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
             available = list(state["admissible_commands"])
             messages.append({"role": "user", "content": str(state["feedback"]) +
                              "\nAvailable commands:\n" + "\n".join(available)})
-            response = generate(agent, tokenizer, messages, device, max_new_tokens,
+            actor_messages = messages
+            if actor_history_turns is not None:
+                from ttcl.trajectory_hyperlora.train_alf_next_task import (
+                    compact_messages,
+                )
+                actor_messages = compact_messages(messages, actor_history_turns)
+            response = generate(agent, tokenizer, actor_messages, device, max_new_tokens,
                                 available if constrain_actions else None)
             command = clean_command(response, available)
             valid = command in available

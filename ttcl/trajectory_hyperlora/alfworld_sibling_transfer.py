@@ -251,7 +251,9 @@ def evaluate(args):
         rows = rows[:args.limit]
     agent, tokenizer = load_agent(args.model, args.checkpoint,
                                   args.device, args.gpu_fraction)
-    result = {"protocol": f"Cross-game ALFWorld {args.split} transfer; task-sibling expert source versus another same-family expert source versus no LoRA; target rollout has no expert leakage; 30 steps, 64 tokens, official won; actor source text {'included with LoRA' if args.memory_text else 'absent'}",
+    result = {"protocol": f"Cross-game ALFWorld {args.split} transfer; task-sibling expert source versus another same-family expert source versus no LoRA; target rollout has no expert leakage; 30 steps, 64 tokens, official won; actor source text {'included with LoRA' if args.memory_text else 'absent'}" +
+        (f"; actor history initial plus last {args.actor_history_turns} turns"
+         if args.actor_history_turns else ""),
         "candidates_sha256": file_hash(args.candidates),
         "source_review_sha256": file_hash(args.source_review),
         "checkpoint_sha256": file_hash(args.checkpoint),
@@ -262,6 +264,8 @@ def evaluate(args):
         "source_truncation": args.source_truncation,
         "source_max_tokens": args.source_max_tokens,
         "memory_text": args.memory_text,
+        **({"actor_history_turns": args.actor_history_turns}
+           if args.actor_history_turns else {}),
         "per_family_limit": args.per_family_limit,
         "games": [], "failures": []}
     for row, note in rows:
@@ -285,6 +289,7 @@ def evaluate(args):
                     adapter=records is not None, device=args.device,
                     max_steps=30, max_new_tokens=64,
                     constrain_actions=True,
+                    actor_history_turns=(args.actor_history_turns or None),
                     memory_text=(sibling_memory_text(records)
                                  if args.memory_text and records is not None
                                  else None))
@@ -576,12 +581,14 @@ def main():
                         default="head_tail")
     parser.add_argument("--memory-text", action="store_true",
                         help="Also show the same completed source as actor text")
+    parser.add_argument("--actor-history-turns", type=int, default=0,
+                        help="Keep initial observation and this many recent turns, matching action supervision; 0 keeps the full history")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--gpu-fraction", type=float, default=.6)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if (args.limit < 0 or args.per_family_limit < 0 or args.per_family < 1 or
-            args.large_offset < 0 or
+            args.large_offset < 0 or args.actor_history_turns < 0 or
             args.source_max_tokens < 2 or
             args.contextual_source_max_tokens < 2 or
             not 0 < args.gpu_fraction <= 1):
