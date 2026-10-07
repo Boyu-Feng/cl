@@ -130,19 +130,34 @@ def generate(agent, tokenizer, messages: list[dict], device: str,
                             skip_special_tokens=True).strip()
 
 
+def guarded_commands(feedback: str, available: list[str],
+                     seen: dict[tuple[str, str], int],
+                     threshold: int | None) -> list[str]:
+    """Limit repeated state-action choices while retaining a safe fallback."""
+    if threshold is None:
+        return available
+    novel = [command for command in available
+             if seen.get((feedback, command), 0) < threshold]
+    return novel or available
+
+
 def run_episode(agent, tokenizer, game: Path, fields: dict,
                 *, adapter: bool, device: str, max_steps: int,
                 max_new_tokens: int,
                 constrain_actions: bool = False,
                 fixed_adapter: list[torch.Tensor] | None = None,
                 memory_text: str | None = None,
-                actor_history_turns: int | None = None) -> dict:
+                actor_history_turns: int | None = None,
+                loop_guard_max: int | None = None) -> dict:
     if adapter and fixed_adapter is not None:
         raise ValueError("Choose trajectory adapter or fixed adapter")
     if actor_history_turns is not None and actor_history_turns < 1:
         raise ValueError("Actor history window must be positive")
+    if loop_guard_max is not None and loop_guard_max < 1:
+        raise ValueError("Loop guard threshold must be positive")
     env = make_env(game)
     trajectory = []
+    observation_actions: dict[tuple[str, str], int] = {}
     try:
         state = env.reset()
         initial_observation = str(state["feedback"])
@@ -191,6 +206,9 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 with torch.no_grad():
                     agent.set_source(fields, target_fields=current_target)
             available = list(state["admissible_commands"])
+            feedback = str(state["feedback"])
+            allowed = guarded_commands(feedback, available,
+                                       observation_actions, loop_guard_max)
             messages.append({"role": "user", "content": str(state["feedback"]) +
                              "\nAvailable commands:\n" + "\n".join(available)})
             actor_messages = messages
@@ -200,9 +218,11 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 )
                 actor_messages = compact_messages(messages, actor_history_turns)
             response = generate(agent, tokenizer, actor_messages, device, max_new_tokens,
-                                available if constrain_actions else None)
+                                allowed if constrain_actions else None)
             command = clean_command(response, available)
             valid = command in available
+            key = (feedback, command)
+            observation_actions[key] = observation_actions.get(key, 0) + 1
             state, _, done = env.step(command)
             messages.append({"role": "assistant", "content": response})
             trajectory.append({"turn": turn, "response": response,
