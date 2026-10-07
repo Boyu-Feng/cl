@@ -8,6 +8,8 @@
 
 近期轨迹 LoRA 与 MemRL 的 ALFWorld **30 题／134 题／单次／三次**结果，以及 XLand 受控在线与官方历史动作指标、各自的数据划分和限制，统一见 [结果总览](ttcl/trajectory_hyperlora/ALFWORLD_RESULTS_OVERVIEW_20261006.md)。
 
+从空历史逐题把自身轨迹写入参数经验的后续研究见 [在线任务条件 LoRA 与成功门控](ttcl/trajectory_hyperlora/ALFWORLD_ONLINE_CONTEXT_MEMORY_20261007.md)：旧原始超网络的运行平均几乎等同于重编码全部历史；更强的任务条件超网络在两组各 18 道训练域题上，无 LoRA 为 6/18、7/18，全轨迹持久因子为 5/18、9/18，仅官方成功轨迹更新的向量记忆为 7/18、9/18。合计 13/36、14/36、16/36；两组独立从空历史开始，尚无官方 `valid_unseen` 在线验证。
+
 2026-10-07 的后续超网络研究见 [v3 部分历史训练与文本经验对照](ttcl/trajectory_hyperlora/TRAJECTORY_LORA_V3_RESEARCH_20261007.md)：保留旧检查点，新版在受控 XLand 的同一两条来源轨迹上提升动作预测，并与原始／结构化文本经验、ALFWorld 同题文本经验比较；其中一步 tile 指标与 ALFWorld 官方通关分开报告。
 
 官方 XLand 环境奖励后续见 [v3 迁移与 v4/v5 在线验证](ttcl/trajectory_hyperlora/OFFICIAL_XLAND_V4_V5_RESEARCH_20261007.md)：在官方规则集实际执行六动作并读取原生 reward，也使用 XLand-100B 已审核正奖励历史；受控 v3 尚无稳定直接迁移，v4 正奖励门控未改善新 8 题，v5 的 probe 选用只带来很小的探索性回报差。此处是 2–3 回合小样本，不是 XLand-100B 论文的 500 回合完整评测。
