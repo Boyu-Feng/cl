@@ -5,7 +5,8 @@ import unittest
 import torch
 
 from ttcl.trajectory_hyperlora.trajectory_lora_rl import (
-    Episode, PairedCase, content_sha256, paired_episode_policy_gradient,
+    Episode, PairedCase, content_sha256, latent_adapter_reinforce,
+    paired_episode_policy_gradient,
 )
 
 
@@ -60,6 +61,12 @@ class PairedPolicyGradientTest(unittest.TestCase):
     def test_rejects_test_targets(self):
         with self.assertRaises(ValueError):
             PairedCase([{"event": 1}], "x", "a" * 64, 1, "test")
+
+    def test_latent_gradient_uses_reward_difference(self):
+        mean = torch.tensor([0.0], requires_grad=True)
+        loss = latent_adapter_reinforce(mean, torch.tensor([1.0]), .5, 1, 0)
+        loss.backward()
+        self.assertLess(mean.grad.item(), 0)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import json
 from typing import Any, Protocol
 
 import torch
+from torch.distributions import Normal
 
 
 def trajectory_text(events: list[dict[str, Any]]) -> str:
@@ -120,3 +121,23 @@ def paired_episode_policy_gradient(actor: PairedActor, case: PairedCase,
               "adapter_budget": sampled.budget_used,
               "status": "complete"}
     return loss, record
+
+
+def latent_adapter_reinforce(mean: torch.Tensor, sampled_latent: torch.Tensor,
+                             std: float, adapter_reward: float,
+                             baseline_reward: float) -> torch.Tensor:
+    """Score-function loss when the actor's action log probabilities are unavailable.
+
+    A stochastic low-dimensional code is converted to LoRA by the generator.
+    The environment can execute arbitrary actions and provide any scalar reward.
+    The sample is detached in the density so gradients update the code mean,
+    rather than differentiating through the non-differentiable environment.
+    """
+    if mean.shape != sampled_latent.shape or not 0 < std < float("inf"):
+        raise ValueError("Latent shape mismatch or invalid sampling standard deviation")
+    if not torch.isfinite(mean).all() or not torch.isfinite(sampled_latent).all():
+        raise ValueError("Non-finite latent")
+    advantage = float(adapter_reward) - float(baseline_reward)
+    if not torch.isfinite(torch.tensor(advantage)):
+        raise ValueError("Non-finite reward difference")
+    return -advantage * Normal(mean, std).log_prob(sampled_latent.detach()).sum()
