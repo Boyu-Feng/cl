@@ -43,8 +43,26 @@
 
 两组共 **36 道不重复的训练域题**，分别从空历史开始：无 LoRA **13/36**，全轨迹持久因子 **14/36**，成功门控向量 **16/36**。门控在两组都高于无 LoRA，但第二组与持久因子持平；这支持进一步验证门控输入质量，不支持宣称门控已稳定优于其他在线更新。两组都用来探索方法，不能将合计当成独立的官方 `valid_unseen` 检验。
 
+## 官方 `valid_unseen` 的从空记忆在线验证
+
+在上述训练域顺序和门控规则固定后，从已审核的 MemRL-134 官方 `valid_unseen` 目标集合中，按原顺序取每个任务家族前 **6 题**，共 36 道、六类均衡。重新审核了目标题内容、当前 checkpoint 和本方法的输入绑定；旧审核文件里的专家来源**没有**进入演员或超网络。本轮从空记忆启动一条连续的在线顺序，家族间也不清空记忆。每题分别跑同设置无 LoRA 与截至当时仅由**自身已成功轨迹**更新的 LoRA，各一次、50 步／64 token、贪心可用动作、2 轮演员历史、两次重复动作保护。超网络与 Qwen 全程冻结，任何目标题的未来轨迹不可能用于本题动作。
+
+| 官方 `valid_unseen` 家族 | 题数 | 无 LoRA | 成功门控在线 LoRA |
+|---|---:|---:|---:|
+| 普通放置 | 6 | 2 | **4** |
+| 查看物体 | 6 | 4 | **5** |
+| 清洗后放置 | 6 | 1 | **3** |
+| 加热后放置 | 6 | 1 | **3** |
+| 冷却后放置 | 6 | 2 | 2 |
+| 双物体放置 | 6 | 1 | **2** |
+| **合计** | **36** | **11** | **19** |
+
+逐题配对新增成功 **10**、退化 **2**；36/36 题及双方回合均完成，**零运行失败**。19 次成功对应 19 次真实轨迹写入；其中 6 条来源因超过 2048 token 编码预算而按已声明规则保留头尾。第一题从空记忆开始，双方完整动作轨迹相同。审计逐项检查了官方 split、目标题文件哈希、预算、逐题既往轨迹摘要、记忆向量状态链、仅成功才更新以及官方 `won`。审计文件 SHA-256：`8687734c217dc410c7dd26832c1877bd1de9fb3bee7347aac8f000b554bef321`。
+
+这是一条值得后续扩展的**在线效果**：模型确实根据过去由自己取得的成功轨迹更新参数，并在后续 36 道题上相对同演员无 LoRA 有净收益。该 134 题集合先前已用于固定专家来源超网络比较，因此这 36 题不是研究过程里完全未看过的新测试集；本轮小样本不能保证其他题序、种子或全部 134 题也有相同幅度。此处没有成功轨迹置换对照，不能把收益进一步归因于“正确历史内容对应正确任务”，也不能直接宣称比文本 MemRL 更好。
+
 ## 解释边界与复现
 
-任务条件超网络此前在固定专家来源的 `valid_unseen` 中有收益，不代表从空历史的自身轨迹也能提供同质量输入。本轮第一组对这个区别给出直接证据：全写入的两种表示都为 5/18，低于无 LoRA 的 6/18；成功门控为 7/18。第二组则显示全写入因子和门控都能达到 9/18，高于无 LoRA 的 7/18。题序、来源质量和截断频率都可能影响收益。这里的 36 题均属于 ALFWorld 官方**训练域**，也不是 MemRL 的等预算完整在线对照。尚不能声称任何一版在官方 `valid_unseen` 或 CLBench 上稳定有效。
+任务条件超网络此前在固定专家来源的 `valid_unseen` 中有收益，不代表从空历史的自身轨迹也能提供同质量输入。训练域第一组显示全写入的两种表示都为 5/18，低于无 LoRA 的 6/18；成功门控为 7/18。训练域第二组则显示全写入因子和门控都能达到 9/18，高于无 LoRA 的 7/18。题序、来源质量和截断频率都可能影响收益。官方 `valid_unseen` 的 36 题验证给出了 19/36 对 11/36 的正向信号，但它复用了先前研究碰过的目标集合，还不是等预算、同来源的 MemRL 对照；也没有证明 CLBench 上有效。
 
-实现和复核入口：`analyze_online_lora_factor_equivalence_v1.py`、`alfworld_online_persistent_context_lora_v1.py`、`alfworld_online_context_vector_mean_v1.py`、`alfworld_online_context_vector_reward_gate_v2.py`、`audit_alfworld_online_context_memory_v1.py`、`audit_alfworld_online_reward_gate_replication_v2.py`。模型、数据、审核记录和原始结果仍在 Git 忽略路径；Git 只保存代码与本文汇总。下一步应在冻结的官方 `valid_unseen` 顺序上检验这个固定更新规则，并针对自身成功／失败轨迹的不同质量训练超网络，同时控制长轨迹中段信息丢失。
+实现和复核入口：`analyze_online_lora_factor_equivalence_v1.py`、`alfworld_online_persistent_context_lora_v1.py`、`alfworld_online_context_vector_mean_v1.py`、`alfworld_online_context_vector_reward_gate_v2.py`、`audit_alfworld_online_context_memory_v1.py`、`audit_alfworld_online_reward_gate_replication_v2.py`、`alfworld_online_reward_gate_valid_unseen_v1.py`、`audit_alfworld_online_reward_gate_valid_unseen_v1.py`。模型、数据、审核记录和原始结果仍在 Git 忽略路径；Git 只保存代码与本文汇总。下一步应在更大、预先冻结的顺序上复测，增加成功轨迹置换／无关历史对照，并针对自身成功／失败轨迹的不同质量训练超网络，同时控制长轨迹中段信息丢失。
