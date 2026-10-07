@@ -4,6 +4,8 @@
 
 同日[方向投影奖励训练 v6](ttcl/trajectory_hyperlora/ALF_PROJECTED_REWARD_V6_20261007.md)使用相同 72 个自身成功来源—训练题配对和 144 条官方回合预算，独立重放零失败；正负终局回报不同的配对 **22/72**，仅比 v5 的 **21/72** 多一个。已反复使用的 12 题开发评测经重放为无记忆／旧 LoRA／v6 LoRA／原始文本 **4／4／3／3**，同题 v5 LoRA 为 **4/12**。投影明确改变了修正权重，却未改善这批题；新的官方 36 题对照仍在运行。
 
+同一冻结 36 题上，[原生 MemRL 同来源对照](ttcl/trajectory_hyperlora/ALF_FRESH_SEEN_NATIVE_MEMRL_20261007.md)经独立原环境重放为 **13/36**，持续和固定首条 LoRA 均为 **15/36**，无记忆 **11/36**，原始历史文本 **9/36**。MemRL 34 题检索到非空经验，11 条共同成功轨迹触发 11 次原生 writer 写入；LoRA 对 MemRL 有 7 题独有成功，MemRL 有 5 题独有成功。差两题不足以证明参数经验稳定优于文本经验；同来源对照也不是各方法自身闭环采集。
+
 2026-10-06 的 XLand 在线轨迹→LoRA、自蒸馏与反馈重试实验见 [专项报告](OFFICIAL_XLAND_ONLINE_REPAIR_20261006.md)。该试验使用官方环境奖励和独立历史的专家动作两套指标；结果不能并入下方 ALFWorld / CLBench 分数。
 
 2026-10-07 的轨迹反馈奖励、有效 LoRA 矩阵分析与自身成功轨迹后见蒸馏见 [反馈残差 v1/v2](ttcl/trajectory_hyperlora/ALF_FEEDBACK_RESIDUAL_RL_20261007.md)、[中心化生成器 v3](ttcl/trajectory_hyperlora/CENTERED_EVIDENCE_LORA_V3_20261007.md)和[自身成功软蒸馏与 v4 对照](ttcl/trajectory_hyperlora/ALF_OWN_ONLY_SOFT_DISTILL_20261007.md)。v4 成对真实奖励训练在官方 `valid_seen` 12 题与旧 LoRA 同为 5/12；新软蒸馏版在已反复接触的 `valid_seen` 12 题为 6/12、旧版 5/12，但在另行冻结的官方 `valid_unseen` 12 题两者均为 5/12，尚无复现的净收益。原始标注、运行结果与权重依仓库规则留在 ignored 路径，文档保留摘要、失败与复现入口。
