@@ -1,5 +1,7 @@
 # CL：经验学习实验与从零复现
 
+2026-10-07 新冻结的官方 ALFWorld `valid_seen` 共同自身成功历史 36 题已完成并经原环境逐回合重放：无记忆 **11/36**、持续更新 LoRA **15/36**、固定首条成功来源 LoRA **15/36**、同来源原始历史文本 **9/36**。持续与固定各有三道独有成功，说明新增历史改变了动作但没有净连续更新优势。这是同来源而非各方法自身闭环采集；原生 MemRL 和新投影训练的对照另行评测。计划先于成绩冻结，`valid_seen` 新题只相对于指定历史报告档案。协议、哈希与限制见 [官方新题序在线对照](ttcl/trajectory_hyperlora/ALF_FRESH_SEEN_SHARED_ONLINE_V6_20261007.md)。
+
 2026-10-06 的 XLand 在线轨迹→LoRA、自蒸馏与反馈重试实验见 [专项报告](OFFICIAL_XLAND_ONLINE_REPAIR_20261006.md)。该试验使用官方环境奖励和独立历史的专家动作两套指标；结果不能并入下方 ALFWorld / CLBench 分数。
 
 2026-10-07 的轨迹反馈奖励、有效 LoRA 矩阵分析与自身成功轨迹后见蒸馏见 [反馈残差 v1/v2](ttcl/trajectory_hyperlora/ALF_FEEDBACK_RESIDUAL_RL_20261007.md)、[中心化生成器 v3](ttcl/trajectory_hyperlora/CENTERED_EVIDENCE_LORA_V3_20261007.md)和[自身成功软蒸馏与 v4 对照](ttcl/trajectory_hyperlora/ALF_OWN_ONLY_SOFT_DISTILL_20261007.md)。v4 成对真实奖励训练在官方 `valid_seen` 12 题与旧 LoRA 同为 5/12；新软蒸馏版在已反复接触的 `valid_seen` 12 题为 6/12、旧版 5/12，但在另行冻结的官方 `valid_unseen` 12 题两者均为 5/12，尚无复现的净收益。原始标注、运行结果与权重依仓库规则留在 ignored 路径，文档保留摘要、失败与复现入口。
