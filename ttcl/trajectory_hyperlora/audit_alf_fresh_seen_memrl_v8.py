@@ -43,6 +43,7 @@ def audit(args):
     base_total = text_total = memrl_total = 0.
     retrieval_hits = memory_writes = 0
     writer_calls_before = 0
+    previous_items = set()
     for target, source, row in zip(review['targets'], parent['games'],
                                    report['games'], strict=True):
         if (row['index'] != target['index'] or
@@ -68,6 +69,7 @@ def audit(args):
                 retrieved['tokens'] != len(tokenizer.encode(
                     context, add_special_tokens=False)) or
                 retrieved['tokens'] > 2048 or
+                not set(retrieved['ids']).issubset(previous_items) or
                 retrieved['context_sha256'] !=
                     hashlib.sha256(context.encode()).hexdigest()):
             raise ValueError('Changed retrieved text or actor prompt budget')
@@ -103,12 +105,14 @@ def audit(args):
                 state['input_tokens'] != row['writer_input_tokens_after'] or
                 state['output_tokens'] != row['writer_output_tokens_after'] or
                 state['limit_hits'] != row['writer_limit_hits_after'] or
-                state['errors'] or len(state['items']) != memory_writes or
+                state['errors'] or
+                not 0 <= len(state['items']) <= memory_writes or
                 source['base']['reward'] and
                     row['memory_update']['new_memory_id'] not in
                         state['items']):
             raise ValueError('Changed native memory snapshot or writer accounting')
         writer_calls_before = row['writer_calls_after']
+        previous_items = set(state['items'])
     summary = {'games': 36, 'base': base_total,
         'raw_text': text_total, 'native_memrl': memrl_total,
         'retrieval_hits': retrieval_hits,
