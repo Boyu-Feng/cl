@@ -1,5 +1,7 @@
 # CL：经验学习实验与从零复现
 
+本项目拟投稿的[相关工作与新颖性边界审计](ttcl/trajectory_hyperlora/RELATED_WORK_POSITIONING_20261008.md)已补充 TMEM、CLAW、LatentSkill、SHINE、Text-to-LoRA、Code2LoRA 与 BQ-LoRA 的原文对照。在线参数记忆、轨迹生成 LoRA、固定投影和行为几何都不能单独声称首创；TMEM 已报告筛选版 CL-Bench，评分协议与本仓库官方任务运行不直接可比。真正仍待证明的是从自身反馈轨迹直接生成、依据未来回报决定跨题写入，在独立闭环中稳定超过固定首条及公平文本／在线 SGD 记忆。
+
 2026-10-08 已在读取新回报前冻结[扩大写入效用训练池 v14](ttcl/trajectory_hyperlora/ALF_INCREMENTAL_POOL_V14_PROTOCOL_20261008.md)：官方 ALFWorld `train` 60 道训练题、18 道开发题，六次自身成功轨迹顺序更新，计划 468 组写入／冻结配对。18 道开发题的任务目录未出现在本地旧 JSON 记录中；三份 GPU 分片各 156 组。v13 候选因部分开发题与旧记录共享任务目录而在运行前保留并改为 v14。此处尚无新成绩，开发题与正式官方 `valid_*` 测试不可混用。
 
 同批数据的[来源—目标题条件写入门控 v17](ttcl/trajectory_hyperlora/ALF_INCREMENTAL_GATE_V17_PROTOCOL_20261008.md)也在完整新回报出现前固定：以配对终局差训练不含人工任务／动作槽的核门控，用整道训练题和整次来源转移两轴交叉验证选择超参数，目录隔离开发题只评一次；恒写与恒不写为显式候选。该阶段只学习是否写入，尚不学习新 LoRA 方向，也没有开发／正式评测成绩。
