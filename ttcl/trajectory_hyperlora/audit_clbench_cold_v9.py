@@ -12,7 +12,8 @@ from ttcl.trajectory_hyperlora.clbench_online_parameter_memory_v2 import ROOT
 from ttcl.trajectory_hyperlora.train_clbench_hyperlora_v1 import clean_records
 
 
-def audit(report_path: Path, review_path: Path):
+def audit(report_path: Path, review_path: Path, actor_script: Path | None = None,
+          positive_only: bool = False):
     report = json.loads(report_path.read_text())
     review = json.loads(review_path.read_text())
     binding = review["binding"]
@@ -20,7 +21,7 @@ def audit(report_path: Path, review_path: Path):
             "binding": binding, "targets": review["targets"]}) or
             report["review_sha256"] != file_hash(review_path) or
             report["checkpoint_sha256"] != binding["checkpoint_sha256"] or
-            binding["actor_script_sha256"] != file_hash(
+            binding["actor_script_sha256"] != file_hash(actor_script or
                 ROOT / "ttcl/trajectory_hyperlora/clbench_online_parameter_memory_v9.py")):
         raise ValueError("Review or actor binding changed")
     targets = {(x["domain"], x["index"]): x for x in review["targets"]}
@@ -57,7 +58,8 @@ def audit(report_path: Path, review_path: Path):
             online = row["online"]
             should_write = (online["status"] == "complete" and
                 row["index"] + 1 < binding["stop"] and
-                (written == 0 or float(online["reward"]) > 0) and
+                ((float(online["reward"]) > 0) if positive_only else
+                 (written == 0 or float(online["reward"]) > 0)) and
                 (binding.get("max_writes") is None or written < binding["max_writes"]))
             if bool(row["write"]["written"]) != should_write:
                 raise ValueError("Cold-start write chronology changed")
@@ -97,10 +99,14 @@ def main():
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--review", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--actor-script", type=Path,
+                        help="Frozen entrypoint; defaults to cold-start v9")
+    parser.add_argument("--positive-only", action="store_true",
+                        help="Audit v12's positive-reward-only write rule")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError(args.output)
-    result = audit(args.report, args.review)
+    result = audit(args.report, args.review, args.actor_script, args.positive_only)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(result), flush=True)
