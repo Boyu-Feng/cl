@@ -2,6 +2,8 @@
 
 [2026-10-08 CLBench 未提升领域诊断与混合参数记忆复测](ttcl/trajectory_hyperlora/CLBENCH_MIXED_MEMORY_FOLLOWUP_20261008.md)记录频谱、扑克、数据库与 Cohort 的后续官方配对评测，包括负结果、失败记录、训练数据限制和 Docker 阻塞边界。
 
+[类型化来源证据与联合读取门控 v17–v20](ttcl/trajectory_hyperlora/TYPED_EVIDENCE_V20_20261008.md)记录不限于对象数组的证据表示、按配对奖励差训练的操作门控、无标签时回退 LoRA 的协议，以及频谱正结果和 Cohort 数值操作的弃权诊断。
+
 本项目拟投稿的[相关工作与新颖性边界审计](ttcl/trajectory_hyperlora/RELATED_WORK_POSITIONING_20261008.md)已补充 TMEM、CLAW、LatentSkill、SHINE、Text-to-LoRA、Code2LoRA 与 BQ-LoRA 的原文对照。在线参数记忆、轨迹生成 LoRA、固定投影和行为几何都不能单独声称首创；TMEM 已报告筛选版 CL-Bench，评分协议与本仓库官方任务运行不直接可比。真正仍待证明的是从自身反馈轨迹直接生成、依据未来回报决定跨题写入，在独立闭环中稳定超过固定首条及公平文本／在线 SGD 记忆。
 
 [参数经验的功能几何与可证伪主张](ttcl/trajectory_hyperlora/PARAMETER_MEMORY_MECHANISM_THEORY_20261008.md)把有效矩阵、动作间隔梯度、局部策略 Fisher、连续均值信号衰减与同题写入／方法自身闭环两种不同估计量分开。它解释已有矩阵形状为何不足以预测未来收益，并列明后续因果消融；其中公式是机制分析和待验证假设，不是新实验成绩。
