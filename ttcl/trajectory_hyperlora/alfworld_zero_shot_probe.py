@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from typing import Callable
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -146,11 +147,14 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 max_new_tokens: int,
                 constrain_actions: bool = False,
                 fixed_adapter: list[torch.Tensor] | None = None,
+                fixed_adapter_selector: Callable[[str], list[torch.Tensor] | None] | None = None,
                 memory_text: str | None = None,
                 actor_history_turns: int | None = None,
                 loop_guard_max: int | None = None) -> dict:
-    if adapter and fixed_adapter is not None:
+    if adapter and (fixed_adapter is not None or fixed_adapter_selector is not None):
         raise ValueError("Choose trajectory adapter or fixed adapter")
+    if fixed_adapter is not None and fixed_adapter_selector is not None:
+        raise ValueError("Choose one fixed adapter source")
     if actor_history_turns is not None and actor_history_turns < 1:
         raise ValueError("Actor history window must be positive")
     if loop_guard_max is not None and loop_guard_max < 1:
@@ -178,6 +182,8 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
             if agent.task_context_scope == "initial" or not adapter:
                 agent.set_source(fields if adapter else None,
                                  target_fields=target_fields)
+            if fixed_adapter_selector is not None:
+                fixed_adapter = fixed_adapter_selector(initial_observation)
             if fixed_adapter is not None:
                 if len(fixed_adapter) != len(agent.adapters):
                     raise ValueError("Fixed adapter layer count mismatch")
