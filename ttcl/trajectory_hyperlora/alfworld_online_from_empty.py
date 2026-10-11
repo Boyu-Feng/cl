@@ -14,6 +14,9 @@ from pathlib import Path
 
 from ttcl.trajectory_hyperlora.alfworld_zero_shot_probe import load_agent, run_episode
 from ttcl.trajectory_hyperlora.relational_router_pilot import tokenize_records
+from ttcl.trajectory_hyperlora.contextual_alf_source import (
+    contextual_text_fields, source_text,
+)
 
 
 def digest(value: object) -> str:
@@ -135,8 +138,23 @@ def evaluate(args: argparse.Namespace) -> dict:
         # One observed transition cannot form the encoder's covariance.
         # This matters only for pathological one-step initial episodes.
         adapter_on = len(memory) >= 2
-        fields = tokenize_records(tokenizer, memory, args.device,
-                                  max_tokens=args.field_tokens) if adapter_on else {}
+        if adapter_on and agent.encoder_kind == "contextual":
+            records = [{"observation": x["observation"],
+                        "action": x["action"],
+                        "feedback": x["feedback"]} for x in memory]
+            text = source_text(records)
+            ids = tokenizer(text, add_special_tokens=False).input_ids
+            if len(ids) > args.field_tokens:
+                head = args.field_tokens // 2
+                ids = ids[:head] + ids[-(args.field_tokens - head):]
+                text = tokenizer.decode(ids, skip_special_tokens=False)
+            fields = contextual_text_fields(
+                agent, tokenizer, text, args.device,
+                max_source_tokens=args.field_tokens,
+                pooling="both" if agent.task_conditioned else "last")
+        else:
+            fields = tokenize_records(tokenizer, memory, args.device,
+                                      max_tokens=args.field_tokens) if adapter_on else {}
         base = run_episode(agent, tokenizer, args.data_root / game, {},
                            adapter=False, device=args.device,
                            max_steps=args.max_steps,

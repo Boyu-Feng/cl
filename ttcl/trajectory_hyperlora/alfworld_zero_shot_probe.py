@@ -131,6 +131,29 @@ def generate(agent, tokenizer, messages: list[dict], device: str,
                             skip_special_tokens=True).strip()
 
 
+def score_commands(agent, tokenizer, messages: list[dict], commands: list[str],
+                   device: str) -> dict[str, float]:
+    """Score complete legal commands without executing the environment."""
+    if not commands:
+        raise ValueError("Cannot score an empty command set")
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False,
+                                           add_generation_prompt=True)
+    prefix = tokenizer(prompt, add_special_tokens=False).input_ids
+    scores = {}
+    with torch.no_grad():
+        for command in sorted(set(commands)):
+            suffix = tokenizer(command + tokenizer.eos_token,
+                               add_special_tokens=False).input_ids
+            ids = torch.tensor([prefix + suffix], device=device)
+            logits = agent.model(input_ids=ids, use_cache=False).logits
+            token_logits = logits[:, len(prefix)-1:-1]
+            logp = torch.log_softmax(token_logits, dim=-1)
+            target = torch.tensor(suffix, device=device).view(1, -1)
+            scores[command] = float(logp.gather(-1, target.unsqueeze(-1))
+                                    .sum().item())
+    return scores
+
+
 def guarded_commands(feedback: str, available: list[str],
                      seen: dict[tuple[str, str], int],
                      threshold: int | None) -> list[str]:
@@ -149,6 +172,7 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 fixed_adapter: list[torch.Tensor] | None = None,
                 fixed_adapter_selector: Callable[[str], list[torch.Tensor] | None] | None = None,
                 memory_text: str | None = None,
+                evidence_provider: Callable[[str, str, list[str]], str] | None = None,
                 actor_history_turns: int | None = None,
                 loop_guard_max: int | None = None) -> dict:
     if adapter and (fixed_adapter is not None or fixed_adapter_selector is not None):
@@ -197,6 +221,7 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
         if memory_text:
             system += "\n\nPrior attempt record:\n" + memory_text
         messages = [{"role": "system", "content": system}]
+        evidence_reads = []
         for turn in range(max_steps):
             if (adapter and agent.task_conditioned and
                     agent.task_context_scope == "current"):
@@ -223,6 +248,12 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                     compact_messages,
                 )
                 actor_messages = compact_messages(messages, actor_history_turns)
+            if evidence_provider is not None:
+                hint = evidence_provider(initial_observation, feedback, available)
+                if hint:
+                    actor_messages = [dict(item) for item in actor_messages]
+                    actor_messages[0]["content"] += "\n\nPrior public evidence:\n" + hint
+                evidence_reads.append(hashlib.sha256(hint.encode()).hexdigest())
             response = generate(agent, tokenizer, actor_messages, device, max_new_tokens,
                                 allowed if constrain_actions else None)
             command = clean_command(response, available)
@@ -233,11 +264,12 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
             messages.append({"role": "assistant", "content": response})
             trajectory.append({"turn": turn, "response": response,
                                "command": command, "valid": valid,
+                               "available_commands": available,
                                "observation": str(state["feedback"]),
                                "won": bool(state["won"])})
             if done or state["won"]:
                 break
-        return {"status": "complete", "reward": float(bool(state["won"])),
+        result = {"status": "complete", "reward": float(bool(state["won"])),
                 "steps": len(trajectory), "initial_observation": initial_observation,
                 "memory_sha256": hashlib.sha256((memory_text or "").encode()).hexdigest(),
                 "initial_commands_sha256": hashlib.sha256(json.dumps(
@@ -245,6 +277,9 @@ def run_episode(agent, tokenizer, game: Path, fields: dict,
                 "invalid_commands": sum(not step["valid"] for step in trajectory),
                 "trajectory": trajectory,
                 "termination": "success" if state["won"] else "budget_or_environment_done"}
+        if evidence_provider is not None:
+            result["evidence_read_sha256"] = evidence_reads
+        return result
     except Exception as error:
         return {"status": "infrastructure_failure", "error": repr(error),
                 "steps": len(trajectory), "trajectory": trajectory}

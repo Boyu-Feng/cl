@@ -68,6 +68,20 @@ def threshold(scores, labels):
         -abs(value)))
 
 
+def source_vector(agent, tokenizer, records, args):
+    if args.first_observation_only:
+        if not records or not isinstance(records[0].get("observation"), str):
+            raise ValueError("Reviewed source has no first observation")
+        return contextual_text_fields(agent, tokenizer,
+            "Completed source initial observation:\n" +
+                records[0]["observation"],
+            args.device, args.max_source_tokens,
+            pooling=args.pooling)["contextual"]
+    return contextual_source_fields(agent, tokenizer, records,
+        args.device, args.max_source_tokens,
+        pooling=args.pooling)["contextual"]
+
+
 def run(args):
     if args.output.exists() or args.save_checkpoint.exists():
         raise FileExistsError("Fresh matcher outputs required")
@@ -110,12 +124,8 @@ def run(args):
             "Current task observation:\n" + task["observation"],
             args.device, args.max_source_tokens,
             pooling=args.pooling)["contextual"]
-        own = contextual_source_fields(agent, tokenizer,
-            task["source_records"], args.device,
-            args.max_source_tokens, pooling=args.pooling)["contextual"]
-        wrong = contextual_source_fields(agent, tokenizer,
-            task["wrong_records"], args.device,
-            args.max_source_tokens, pooling=args.pooling)["contextual"]
+        own = source_vector(agent, tokenizer, task["source_records"], args)
+        wrong = source_vector(agent, tokenizer, task["wrong_records"], args)
         train_features.append((pair_feature(own, target),
                                pair_feature(wrong, target)))
     development = dev_pairs(args)
@@ -130,12 +140,8 @@ def run(args):
             "Current task observation:\n" + observation,
             args.device, args.max_source_tokens,
             pooling=args.pooling)["contextual"]
-        own = contextual_source_fields(agent, tokenizer,
-            note["source_records"], args.device,
-            args.max_source_tokens, pooling=args.pooling)["contextual"]
-        wrong = contextual_source_fields(agent, tokenizer,
-            note["wrong_records"], args.device,
-            args.max_source_tokens, pooling=args.pooling)["contextual"]
+        own = source_vector(agent, tokenizer, note["source_records"], args)
+        wrong = source_vector(agent, tokenizer, note["wrong_records"], args)
         dev_features.append((pair_feature(own, target),
                              pair_feature(wrong, target)))
 
@@ -205,6 +211,7 @@ def run(args):
     result = {"protocol": "Frozen-Qwen raw contextual pair features, regularized train-only linear matcher; 80/20 task directories per family for fit/internal holdout, threshold fit-only; development source pairs scored after model selection; no development rewards or walkthroughs",
         "source_checkpoint_sha256": file_hash(args.checkpoint),
         "source_only": args.source_only,
+        "first_observation_only": args.first_observation_only,
         "train_candidates_sha256": (file_hash(args.train_candidates)
             if args.source_only else None),
         "labels_sha256": (None if args.source_only else file_hash(args.labels)),
@@ -236,6 +243,7 @@ def run(args):
                 "feature_scale": feature_scale,
                 "threshold": cut,
                 "source_checkpoint_sha256": result["source_checkpoint_sha256"],
+                "first_observation_only": args.first_observation_only,
                 "labels_sha256": result["labels_sha256"]},
                args.save_checkpoint)
     print(json.dumps({key: result[key] for key in (
@@ -256,6 +264,8 @@ def main():
     parser.add_argument("--source-review", type=Path, default=Path(
         "data/annotations/alf_sibling_train120_reviewed_20261006.json"))
     parser.add_argument("--source-only", action="store_true")
+    parser.add_argument("--first-observation-only", action="store_true",
+                        help="Ablate all source actions and feedback")
     parser.add_argument("--train-candidates", type=Path, default=Path(
         "results/trajectory_hyperlora/alf_sibling_train120_candidates_20261006.json"))
     parser.add_argument("--retry-candidates", type=Path, default=Path(

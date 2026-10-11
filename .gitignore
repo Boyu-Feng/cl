@@ -233,3 +233,6 @@ mykey.py
 
 # MemRL upstream datasets are local assets.
 /current_work/MemRL/data
+
+# Local benchmark scratch directories
+/kv_cache_bench_*/
